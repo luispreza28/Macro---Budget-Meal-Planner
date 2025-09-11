@@ -1,0 +1,187 @@
+import 'package:drift/drift.dart';
+
+import '../../domain/entities/pantry_item.dart';
+import '../../domain/entities/ingredient.dart';
+import '../../domain/repositories/pantry_repository.dart';
+import '../datasources/database.dart';
+
+/// Concrete implementation of PantryRepository using Drift
+class PantryRepositoryImpl implements PantryRepository {
+  const PantryRepositoryImpl(this._database);
+
+  final AppDatabase _database;
+
+  @override
+  Future<List<PantryItem>> getAllPantryItems() async {
+    final items = await _database.select(_database.pantryItems).get();
+    return items.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<PantryItem?> getPantryItemByIngredientId(String ingredientId) async {
+    final item = await (_database.select(_database.pantryItems)
+          ..where((tbl) => tbl.ingredientId.equals(ingredientId)))
+        .getSingleOrNull();
+    
+    return item != null ? _mapToEntity(item) : null;
+  }
+
+  @override
+  Future<List<PantryItem>> getPantryItemsByIngredientIds(List<String> ingredientIds) async {
+    if (ingredientIds.isEmpty) return [];
+    
+    final items = await (_database.select(_database.pantryItems)
+          ..where((tbl) => tbl.ingredientId.isIn(ingredientIds)))
+        .get();
+    
+    return items.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<void> addPantryItem(PantryItem item) async {
+    await _database.into(_database.pantryItems).insert(_mapToCompanion(item));
+  }
+
+  @override
+  Future<void> updatePantryItem(PantryItem item) async {
+    await _database.update(_database.pantryItems).replace(_mapToCompanion(item));
+  }
+
+  @override
+  Future<void> removePantryItem(String id) async {
+    await (_database.delete(_database.pantryItems)..where((tbl) => tbl.id.equals(id))).go();
+  }
+
+  @override
+  Future<void> removePantryItemByIngredientId(String ingredientId) async {
+    await (_database.delete(_database.pantryItems)
+          ..where((tbl) => tbl.ingredientId.equals(ingredientId)))
+        .go();
+  }
+
+  @override
+  Future<void> clearPantry() async {
+    await _database.delete(_database.pantryItems).go();
+  }
+
+  @override
+  Future<bool> isIngredientInPantry(String ingredientId) async {
+    final count = await (_database.selectOnly(_database.pantryItems)
+          ..addColumns([_database.pantryItems.id.count()])
+          ..where(_database.pantryItems.ingredientId.equals(ingredientId)))
+        .getSingle();
+    
+    return count.read(_database.pantryItems.id.count())! > 0;
+  }
+
+  @override
+  Future<List<PantryItem>> getPantryItemsWithSufficientQuantity(
+    Map<String, double> requiredQuantities,
+  ) async {
+    if (requiredQuantities.isEmpty) return [];
+    
+    final ingredientIds = requiredQuantities.keys.toList();
+    final items = await getPantryItemsByIngredientIds(ingredientIds);
+    
+    return items.where((item) {
+      final required = requiredQuantities[item.ingredientId];
+      return required != null && item.qty >= required;
+    }).toList();
+  }
+
+  @override
+  Future<void> useIngredientsFromPantry(Map<String, double> usedQuantities) async {
+    await _database.transaction(() async {
+      for (final entry in usedQuantities.entries) {
+        final ingredientId = entry.key;
+        final usedQty = entry.value;
+        
+        final item = await getPantryItemByIngredientId(ingredientId);
+        if (item != null) {
+          final updatedItem = item.useQuantity(usedQty);
+          if (updatedItem.isEmpty) {
+            await removePantryItem(item.id);
+          } else {
+            await updatePantryItem(updatedItem);
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  Future<int> getTotalPantryValueCents() async {
+    // This would require joining with ingredients table to get prices
+    // For now, return 0 as placeholder
+    return 0;
+  }
+
+  @override
+  Future<int> getPantryItemsCount() async {
+    final count = await (_database.selectOnly(_database.pantryItems)
+          ..addColumns([_database.pantryItems.id.count()]))
+        .getSingle();
+    
+    return count.read(_database.pantryItems.id.count()) ?? 0;
+  }
+
+  @override
+  Future<List<PantryItem>> getPantryItemsByAisle(Aisle aisle) async {
+    // This would require joining with ingredients table to filter by aisle
+    // For now, return all items as placeholder
+    return getAllPantryItems();
+  }
+
+  @override
+  Future<void> bulkInsertPantryItems(List<PantryItem> items) async {
+    await _database.batch((batch) {
+      for (final item in items) {
+        batch.insert(_database.pantryItems, _mapToCompanion(item));
+      }
+    });
+  }
+
+  @override
+  Stream<List<PantryItem>> watchAllPantryItems() {
+    return _database.select(_database.pantryItems).watch().map(
+          (items) => items.map(_mapToEntity).toList(),
+        );
+  }
+
+  @override
+  Stream<PantryItem?> watchPantryItemByIngredientId(String ingredientId) {
+    return (_database.select(_database.pantryItems)
+          ..where((tbl) => tbl.ingredientId.equals(ingredientId)))
+        .watchSingleOrNull()
+        .map((item) => item != null ? _mapToEntity(item) : null);
+  }
+
+  @override
+  Stream<int> watchPantryItemsCount() {
+    return (_database.selectOnly(_database.pantryItems)
+          ..addColumns([_database.pantryItems.id.count()]))
+        .watchSingle()
+        .map((row) => row.read(_database.pantryItems.id.count()) ?? 0);
+  }
+
+  /// Maps database row to domain entity
+  PantryItem _mapToEntity(PantryItemData data) {
+    return PantryItem(
+      id: data.id,
+      ingredientId: data.ingredientId,
+      qty: data.qty,
+      unit: Unit.values.firstWhere((u) => u.value == data.unit),
+    );
+  }
+
+  /// Maps domain entity to database companion
+  PantryItemsCompanion _mapToCompanion(PantryItem item) {
+    return PantryItemsCompanion(
+      id: Value(item.id),
+      ingredientId: Value(item.ingredientId),
+      qty: Value(item.qty),
+      unit: Value(item.unit.value),
+      updatedAt: Value(DateTime.now()),
+    );
+  }
+}

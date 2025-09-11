@@ -1,0 +1,190 @@
+import 'package:drift/drift.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+import '../../domain/entities/user_targets.dart';
+import '../../domain/repositories/user_targets_repository.dart';
+import '../datasources/database.dart';
+
+/// Concrete implementation of UserTargetsRepository using Drift and SharedPreferences
+class UserTargetsRepositoryImpl implements UserTargetsRepository {
+  const UserTargetsRepositoryImpl(this._database, this._prefs);
+
+  final AppDatabase _database;
+  final SharedPreferences _prefs;
+
+  static const String _currentTargetsIdKey = 'current_targets_id';
+  static const String _onboardingCompletedKey = 'onboarding_completed';
+
+  @override
+  Future<UserTargets?> getCurrentUserTargets() async {
+    final currentId = _prefs.getString(_currentTargetsIdKey);
+    if (currentId == null) return null;
+    
+    return await getUserTargetsById(currentId);
+  }
+
+  @override
+  Future<UserTargets?> getUserTargetsById(String id) async {
+    final targets = await (_database.select(_database.userTargets)
+          ..where((tbl) => tbl.id.equals(id)))
+        .getSingleOrNull();
+    
+    return targets != null ? _mapToEntity(targets) : null;
+  }
+
+  @override
+  Future<List<UserTargets>> getAllUserTargets() async {
+    final targets = await _database.select(_database.userTargets).get();
+    return targets.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<void> saveUserTargets(UserTargets targets) async {
+    await _database.into(_database.userTargets).insert(_mapToCompanion(targets));
+    
+    // If this is the first targets, make it current
+    final currentId = _prefs.getString(_currentTargetsIdKey);
+    if (currentId == null) {
+      await setCurrentTargets(targets.id);
+    }
+  }
+
+  @override
+  Future<void> updateUserTargets(UserTargets targets) async {
+    await _database.update(_database.userTargets).replace(_mapToCompanion(targets));
+  }
+
+  @override
+  Future<void> deleteUserTargets(String id) async {
+    await (_database.delete(_database.userTargets)..where((tbl) => tbl.id.equals(id))).go();
+    
+    // If this was the current targets, clear it
+    final currentId = _prefs.getString(_currentTargetsIdKey);
+    if (currentId == id) {
+      await _prefs.remove(_currentTargetsIdKey);
+    }
+  }
+
+  @override
+  Future<void> setCurrentTargets(String id) async {
+    await _prefs.setString(_currentTargetsIdKey, id);
+  }
+
+  @override
+  Future<UserTargets> getDefaultTargets() async {
+    return UserTargets.defaultTargets();
+  }
+
+  @override
+  Future<UserTargets> createCuttingPreset({
+    required double bodyWeightLbs,
+    int? budgetCents,
+  }) async {
+    final targets = UserTargets.cuttingPreset(
+      bodyWeightLbs: bodyWeightLbs,
+      budgetCents: budgetCents,
+    );
+    
+    await saveUserTargets(targets);
+    return targets;
+  }
+
+  @override
+  Future<UserTargets> createBulkingPreset({
+    required double bodyWeightLbs,
+    int? budgetCents,
+  }) async {
+    final targets = UserTargets.bulkingPreset(
+      bodyWeightLbs: bodyWeightLbs,
+      budgetCents: budgetCents,
+    );
+    
+    await saveUserTargets(targets);
+    return targets;
+  }
+
+  @override
+  Future<bool> hasCompletedOnboarding() async {
+    return _prefs.getBool(_onboardingCompletedKey) ?? false;
+  }
+
+  @override
+  Future<void> markOnboardingCompleted() async {
+    await _prefs.setBool(_onboardingCompletedKey, true);
+  }
+
+  @override
+  Future<int> getTargetsCount() async {
+    final count = await (_database.selectOnly(_database.userTargets)
+          ..addColumns([_database.userTargets.id.count()]))
+        .getSingle();
+    
+    return count.read(_database.userTargets.id.count()) ?? 0;
+  }
+
+  @override
+  Stream<UserTargets?> watchCurrentUserTargets() {
+    // This is a simplified implementation
+    // In production, you'd want to listen to SharedPreferences changes
+    return Stream.fromFuture(getCurrentUserTargets());
+  }
+
+  @override
+  Stream<List<UserTargets>> watchAllUserTargets() {
+    return _database.select(_database.userTargets).watch().map(
+          (targets) => targets.map(_mapToEntity).toList(),
+        );
+  }
+
+  /// Maps database row to domain entity
+  UserTargets _mapToEntity(UserTargetData data) {
+    return UserTargets(
+      id: data.id,
+      kcal: data.kcal,
+      proteinG: data.proteinG,
+      carbsG: data.carbsG,
+      fatG: data.fatG,
+      budgetCents: data.budgetCents,
+      mealsPerDay: data.mealsPerDay,
+      timeCapMins: data.timeCapMins,
+      dietFlags: _parseJsonStringList(data.dietFlags),
+      equipment: _parseJsonStringList(data.equipment),
+      planningMode: PlanningMode.values.firstWhere((m) => m.value == data.planningMode),
+    );
+  }
+
+  /// Maps domain entity to database companion
+  UserTargetsCompanion _mapToCompanion(UserTargets targets) {
+    return UserTargetsCompanion(
+      id: Value(targets.id),
+      kcal: Value(targets.kcal),
+      proteinG: Value(targets.proteinG),
+      carbsG: Value(targets.carbsG),
+      fatG: Value(targets.fatG),
+      budgetCents: Value(targets.budgetCents),
+      mealsPerDay: Value(targets.mealsPerDay),
+      timeCapMins: Value(targets.timeCapMins),
+      dietFlags: Value(_encodeJsonStringList(targets.dietFlags)),
+      equipment: Value(_encodeJsonStringList(targets.equipment)),
+      planningMode: Value(targets.planningMode.value),
+      updatedAt: Value(DateTime.now()),
+    );
+  }
+
+  /// Parse JSON string list
+  List<String> _parseJsonStringList(String jsonString) {
+    try {
+      if (jsonString.isEmpty || jsonString == '[]') return [];
+      final decoded = jsonDecode(jsonString);
+      return List<String>.from(decoded);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Encode string list to JSON
+  String _encodeJsonStringList(List<String> list) {
+    return jsonEncode(list);
+  }
+}

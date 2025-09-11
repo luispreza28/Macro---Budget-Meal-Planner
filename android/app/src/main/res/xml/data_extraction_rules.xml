@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <!-- Disable auto backup for security and privacy -->
+    <cloud-backup>
+        <!-- Exclude all data from cloud backup -->
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    
+    <!-- Device transfer rules for app-to-app migration -->
+    <device-transfer>
+        <!-- Allow user data transfer during device migration -->
+        <include domain="database" path="." />
+        <include domain="sharedpref" path="." />
+        <!-- Exclude sensitive data -->
+        <exclude domain="database" path="billing_cache.db" />
+    </device-transfer>
+</data-extraction-rules>

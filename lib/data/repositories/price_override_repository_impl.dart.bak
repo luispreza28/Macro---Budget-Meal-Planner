@@ -1,0 +1,159 @@
+import 'package:drift/drift.dart';
+
+import '../../domain/entities/price_override.dart';
+import '../../domain/repositories/price_override_repository.dart';
+import '../datasources/database.dart';
+
+/// Concrete implementation of PriceOverrideRepository using Drift
+class PriceOverrideRepositoryImpl implements PriceOverrideRepository {
+  const PriceOverrideRepositoryImpl(this._database);
+
+  final AppDatabase _database;
+
+  @override
+  Future<List<PriceOverride>> getAllPriceOverrides() async {
+    final overrides = await _database.select(_database.priceOverrides).get();
+    return overrides.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<PriceOverride?> getPriceOverrideByIngredientId(String ingredientId) async {
+    final override = await (_database.select(_database.priceOverrides)
+          ..where((tbl) => tbl.ingredientId.equals(ingredientId)))
+        .getSingleOrNull();
+    
+    return override != null ? _mapToEntity(override) : null;
+  }
+
+  @override
+  Future<List<PriceOverride>> getPriceOverridesByIngredientIds(
+    List<String> ingredientIds,
+  ) async {
+    if (ingredientIds.isEmpty) return [];
+    
+    final overrides = await (_database.select(_database.priceOverrides)
+          ..where((tbl) => tbl.ingredientId.isIn(ingredientIds)))
+        .get();
+    
+    return overrides.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<void> addPriceOverride(PriceOverride override) async {
+    await _database.into(_database.priceOverrides).insert(_mapToCompanion(override));
+  }
+
+  @override
+  Future<void> updatePriceOverride(PriceOverride override) async {
+    await _database.update(_database.priceOverrides).replace(_mapToCompanion(override));
+  }
+
+  @override
+  Future<void> deletePriceOverride(String id) async {
+    await (_database.delete(_database.priceOverrides)..where((tbl) => tbl.id.equals(id))).go();
+  }
+
+  @override
+  Future<void> deletePriceOverrideByIngredientId(String ingredientId) async {
+    await (_database.delete(_database.priceOverrides)
+          ..where((tbl) => tbl.ingredientId.equals(ingredientId)))
+        .go();
+  }
+
+  @override
+  Future<void> clearAllPriceOverrides() async {
+    await _database.delete(_database.priceOverrides).go();
+  }
+
+  @override
+  Future<bool> hasPriceOverrideForIngredient(String ingredientId) async {
+    final count = await (_database.selectOnly(_database.priceOverrides)
+          ..addColumns([_database.priceOverrides.id.count()])
+          ..where(_database.priceOverrides.ingredientId.equals(ingredientId)))
+        .getSingle();
+    
+    return count.read(_database.priceOverrides.id.count())! > 0;
+  }
+
+  @override
+  Future<int> getEffectivePriceForIngredient(
+    String ingredientId,
+    int originalPriceCents,
+  ) async {
+    final override = await getPriceOverrideByIngredientId(ingredientId);
+    return override?.pricePerUnitCents ?? originalPriceCents;
+  }
+
+  @override
+  Future<int> getPriceOverridesCount() async {
+    final count = await (_database.selectOnly(_database.priceOverrides)
+          ..addColumns([_database.priceOverrides.id.count()]))
+        .getSingle();
+    
+    return count.read(_database.priceOverrides.id.count()) ?? 0;
+  }
+
+  @override
+  Future<void> bulkInsertPriceOverrides(List<PriceOverride> overrides) async {
+    await _database.batch((batch) {
+      for (final override in overrides) {
+        batch.insert(_database.priceOverrides, _mapToCompanion(override));
+      }
+    });
+  }
+
+  @override
+  Stream<List<PriceOverride>> watchAllPriceOverrides() {
+    return _database.select(_database.priceOverrides).watch().map(
+          (overrides) => overrides.map(_mapToEntity).toList(),
+        );
+  }
+
+  @override
+  Stream<PriceOverride?> watchPriceOverrideByIngredientId(String ingredientId) {
+    return (_database.select(_database.priceOverrides)
+          ..where((tbl) => tbl.ingredientId.equals(ingredientId)))
+        .watchSingleOrNull()
+        .map((override) => override != null ? _mapToEntity(override) : null);
+  }
+
+  @override
+  Stream<int> watchPriceOverridesCount() {
+    return (_database.selectOnly(_database.priceOverrides)
+          ..addColumns([_database.priceOverrides.id.count()]))
+        .watchSingle()
+        .map((row) => row.read(_database.priceOverrides.id.count()) ?? 0);
+  }
+
+  /// Maps database row to domain entity
+  PriceOverride _mapToEntity(PriceOverrideData data) {
+    PurchasePack? purchasePack;
+    if (data.purchasePackQty != null && data.purchasePackUnit != null) {
+      purchasePack = PurchasePack(
+        qty: data.purchasePackQty!,
+        unit: Unit.values.firstWhere((u) => u.value == data.purchasePackUnit!),
+        priceCents: data.purchasePackPriceCents,
+      );
+    }
+
+    return PriceOverride(
+      id: data.id,
+      ingredientId: data.ingredientId,
+      pricePerUnitCents: data.pricePerUnitCents,
+      purchasePack: purchasePack,
+    );
+  }
+
+  /// Maps domain entity to database companion
+  PriceOverridesCompanion _mapToCompanion(PriceOverride override) {
+    return PriceOverridesCompanion(
+      id: Value(override.id),
+      ingredientId: Value(override.ingredientId),
+      pricePerUnitCents: Value(override.pricePerUnitCents),
+      purchasePackQty: Value(override.purchasePack?.qty),
+      purchasePackUnit: Value(override.purchasePack?.unit.value),
+      purchasePackPriceCents: Value(override.purchasePack?.priceCents),
+      updatedAt: Value(DateTime.now()),
+    );
+  }
+}

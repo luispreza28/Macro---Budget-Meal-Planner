@@ -1,0 +1,291 @@
+import 'package:drift/drift.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+import '../../domain/entities/plan.dart';
+import '../../domain/repositories/plan_repository.dart';
+import '../datasources/database.dart';
+
+/// Concrete implementation of PlanRepository using Drift and SharedPreferences
+class PlanRepositoryImpl implements PlanRepository {
+  const PlanRepositoryImpl(this._database, this._prefs);
+
+  final AppDatabase _database;
+  final SharedPreferences _prefs;
+
+  static const String _currentPlanIdKey = 'current_plan_id';
+
+  @override
+  Future<List<Plan>> getAllPlans() async {
+    final plans = await _database.select(_database.plans).get();
+    return plans.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<Plan?> getPlanById(String id) async {
+    final plan = await (_database.select(_database.plans)
+          ..where((tbl) => tbl.id.equals(id)))
+        .getSingleOrNull();
+    
+    return plan != null ? _mapToEntity(plan) : null;
+  }
+
+  @override
+  Future<Plan?> getCurrentPlan() async {
+    final currentId = _prefs.getString(_currentPlanIdKey);
+    if (currentId == null) return null;
+    
+    return await getPlanById(currentId);
+  }
+
+  @override
+  Future<List<Plan>> getRecentPlans({int limit = 10}) async {
+    final plans = await (_database.select(_database.plans)
+          ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
+          ..limit(limit))
+        .get();
+    
+    return plans.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<List<Plan>> getPlansByUserTargetsId(String userTargetsId) async {
+    final plans = await (_database.select(_database.plans)
+          ..where((tbl) => tbl.userTargetsId.equals(userTargetsId)))
+        .get();
+    
+    return plans.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<void> savePlan(Plan plan) async {
+    await _database.into(_database.plans).insert(_mapToCompanion(plan));
+  }
+
+  @override
+  Future<void> updatePlan(Plan plan) async {
+    await _database.update(_database.plans).replace(_mapToCompanion(plan));
+  }
+
+  @override
+  Future<void> deletePlan(String id) async {
+    await (_database.delete(_database.plans)..where((tbl) => tbl.id.equals(id))).go();
+    
+    // If this was the current plan, clear it
+    final currentId = _prefs.getString(_currentPlanIdKey);
+    if (currentId == id) {
+      await _prefs.remove(_currentPlanIdKey);
+    }
+  }
+
+  @override
+  Future<void> setCurrentPlan(String planId) async {
+    await _prefs.setString(_currentPlanIdKey, planId);
+  }
+
+  @override
+  Future<void> clearCurrentPlan() async {
+    await _prefs.remove(_currentPlanIdKey);
+  }
+
+  @override
+  Future<List<Plan>> getPlansInDateRange({
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    final plans = await (_database.select(_database.plans)
+          ..where((tbl) => 
+              tbl.createdAt.isBetweenValues(startDate, endDate)))
+        .get();
+    
+    return plans.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<List<Plan>> getPlansInBudgetRange({
+    int? minBudgetCents,
+    int? maxBudgetCents,
+  }) async {
+    var query = _database.select(_database.plans);
+    
+    if (minBudgetCents != null) {
+      query = query..where((tbl) => tbl.totalCostCents.isBiggerOrEqualValue(minBudgetCents));
+    }
+    
+    if (maxBudgetCents != null) {
+      query = query..where((tbl) => tbl.totalCostCents.isSmallerOrEqualValue(maxBudgetCents));
+    }
+    
+    final plans = await query.get();
+    return plans.map(_mapToEntity).toList();
+  }
+
+  @override
+  Future<List<Plan>> getBestScoringPlans({
+    required double targetKcal,
+    required double targetProteinG,
+    required double targetCarbsG,
+    required double targetFatG,
+    int? budgetCents,
+    required Map<String, double> weights,
+    int limit = 10,
+  }) async {
+    final allPlans = await getAllPlans();
+    
+    // Calculate scores and sort
+    final plansWithScores = allPlans.map((plan) => {
+      'plan': plan,
+      'score': plan.calculateScore(
+        targetKcal: targetKcal,
+        targetProteinG: targetProteinG,
+        targetCarbsG: targetCarbsG,
+        targetFatG: targetFatG,
+        budgetCents: budgetCents,
+        weights: weights,
+      ),
+    }).toList();
+    
+    plansWithScores.sort((a, b) => 
+        (a['score'] as double).compareTo(b['score'] as double));
+    
+    return plansWithScores
+        .take(limit)
+        .map((item) => item['plan'] as Plan)
+        .toList();
+  }
+
+  @override
+  Future<bool> planExists(String id) async {
+    final count = await (_database.selectOnly(_database.plans)
+          ..addColumns([_database.plans.id.count()])
+          ..where(_database.plans.id.equals(id)))
+        .getSingle();
+    
+    return count.read(_database.plans.id.count())! > 0;
+  }
+
+  @override
+  Future<int> getPlansCount() async {
+    final count = await (_database.selectOnly(_database.plans)
+          ..addColumns([_database.plans.id.count()]))
+        .getSingle();
+    
+    return count.read(_database.plans.id.count()) ?? 0;
+  }
+
+  @override
+  Future<int> getActivePlansCount() async {
+    // For simplicity, return total count
+    // In production, might track active vs archived plans
+    return getPlansCount();
+  }
+
+  @override
+  Future<void> cleanupOldPlans({int keepCount = 50}) async {
+    final totalCount = await getPlansCount();
+    if (totalCount <= keepCount) return;
+    
+    final plansToDelete = totalCount - keepCount;
+    final oldPlans = await (_database.select(_database.plans)
+          ..orderBy([(tbl) => OrderingTerm.asc(tbl.createdAt)])
+          ..limit(plansToDelete))
+        .get();
+    
+    for (final plan in oldPlans) {
+      await deletePlan(plan.id);
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> getPlanStatistics() async {
+    final totalCount = await getPlansCount();
+    final avgCost = await (_database.selectOnly(_database.plans)
+          ..addColumns([_database.plans.totalCostCents.avg()]))
+        .getSingle();
+    
+    return {
+      'total_plans': totalCount,
+      'average_cost_cents': avgCost.read(_database.plans.totalCostCents.avg()) ?? 0,
+    };
+  }
+
+  @override
+  Stream<List<Plan>> watchAllPlans() {
+    return _database.select(_database.plans).watch().map(
+          (plans) => plans.map(_mapToEntity).toList(),
+        );
+  }
+
+  @override
+  Stream<Plan?> watchCurrentPlan() {
+    // Simplified implementation - in production would listen to SharedPreferences changes
+    return Stream.fromFuture(getCurrentPlan());
+  }
+
+  @override
+  Stream<List<Plan>> watchRecentPlans({int limit = 10}) {
+    return (_database.select(_database.plans)
+          ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
+          ..limit(limit))
+        .watch()
+        .map((plans) => plans.map(_mapToEntity).toList());
+  }
+
+  @override
+  Stream<int> watchPlansCount() {
+    return (_database.selectOnly(_database.plans)
+          ..addColumns([_database.plans.id.count()]))
+        .watchSingle()
+        .map((row) => row.read(_database.plans.id.count()) ?? 0);
+  }
+
+  /// Maps database row to domain entity
+  Plan _mapToEntity(PlanData data) {
+    return Plan(
+      id: data.id,
+      name: data.name,
+      userTargetsId: data.userTargetsId,
+      days: _parsePlanDays(data.days),
+      totals: PlanTotals(
+        kcal: data.totalKcal,
+        proteinG: data.totalProteinG,
+        carbsG: data.totalCarbsG,
+        fatG: data.totalFatG,
+        costCents: data.totalCostCents,
+      ),
+      createdAt: data.createdAt,
+    );
+  }
+
+  /// Maps domain entity to database companion
+  PlansCompanion _mapToCompanion(Plan plan) {
+    return PlansCompanion(
+      id: Value(plan.id),
+      name: Value(plan.name),
+      userTargetsId: Value(plan.userTargetsId),
+      days: Value(_encodePlanDays(plan.days)),
+      totalKcal: Value(plan.totals.kcal),
+      totalProteinG: Value(plan.totals.proteinG),
+      totalCarbsG: Value(plan.totals.carbsG),
+      totalFatG: Value(plan.totals.fatG),
+      totalCostCents: Value(plan.totals.costCents),
+      updatedAt: Value(DateTime.now()),
+    );
+  }
+
+  /// Parse plan days from JSON
+  List<PlanDay> _parsePlanDays(String jsonString) {
+    try {
+      if (jsonString.isEmpty || jsonString == '[]') return [];
+      final decoded = jsonDecode(jsonString) as List;
+      return decoded.map((day) => PlanDay.fromJson(day)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// Encode plan days to JSON
+  String _encodePlanDays(List<PlanDay> days) {
+    return jsonEncode(days.map((day) => day.toJson()).toList());
+  }
+}
