@@ -33,6 +33,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         title: const Text('Settings'),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: Navigator.of(context).canPop() ? const BackButton() : null,
       ),
       body: ListView(
         children: [

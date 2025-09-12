@@ -34,6 +34,18 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         title: const Text('Weekly Plan'),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        // explicit back for safety with go_router
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go(AppRouter.home);
+            }
+          },
+        ),
         actions: [
           IconButton(
             onPressed: () => context.go(AppRouter.shoppingList),
@@ -49,8 +61,8 @@ class _PlanPageState extends ConsumerState<PlanPage> {
             tooltip: 'Generate New Plan',
           ),
           PopupMenuButton(
-            itemBuilder: (context) => [
-              const PopupMenuItem(
+            itemBuilder: (context) => const [
+              PopupMenuItem(
                 value: 'settings',
                 child: Row(
                   children: [
@@ -60,7 +72,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'export',
                 child: Row(
                   children: [
@@ -105,7 +117,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 error: (error, stack) => _buildErrorState(error.toString()),
                 data: (recipes) {
                   final recipeMap = {for (var r in recipes) r.id: r};
-                  
+
                   return Stack(
                     children: [
                       Column(
@@ -120,7 +132,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                             actualCostCents: (plan.totals.costCents / 7).round(),
                             showBudget: targets.budgetCents != null,
                           ),
-                          
+
                           // Plan grid
                           Expanded(
                             child: WeeklyPlanGrid(
@@ -134,7 +146,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                           ),
                         ],
                       ),
-                      
+
                       // Swap drawer
                       if (isSwapDrawerOpen && selectedMealIndex != null)
                         Positioned.fill(
@@ -168,23 +180,16 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.error_outline,
-            size: 64,
-            color: Colors.red,
-          ),
+          const Icon(Icons.error_outline, size: 64, color: Colors.red),
           const SizedBox(height: 16),
-          Text(
-            'Error loading plan',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('Error loading plan', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 8),
           Text(
             error,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
           ),
           const SizedBox(height: 16),
           FilledButton(
@@ -204,21 +209,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.settings,
-            size: 64,
-            color: Colors.grey,
-          ),
+          const Icon(Icons.settings, size: 64, color: Colors.grey),
           const SizedBox(height: 16),
-          Text(
-            'Setup Required',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('Setup Required', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 8),
-          const Text(
-            'Please complete your setup to generate meal plans.',
-            textAlign: TextAlign.center,
-          ),
+          const Text('Please complete your setup to generate meal plans.', textAlign: TextAlign.center),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () => context.go(AppRouter.onboarding),
@@ -234,21 +229,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.restaurant_menu,
-            size: 64,
-            color: Colors.grey,
-          ),
+          const Icon(Icons.restaurant_menu, size: 64, color: Colors.grey),
           const SizedBox(height: 16),
-          Text(
-            'No Meal Plan',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('No Meal Plan', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 8),
-          const Text(
-            'Generate your first meal plan to get started.',
-            textAlign: TextAlign.center,
-          ),
+          const Text('Generate your first meal plan to get started.', textAlign: TextAlign.center),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: _showPlanGenerationDialog,
@@ -259,7 +244,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  Widget _buildSwapDrawer(plan, Map<String, Recipe> recipeMap) {
+  Widget _buildSwapDrawer(dynamic plan, Map<String, Recipe> recipeMap) {
     // Get current meal details
     int dayIndex = 0;
     int mealIndex = 0;
@@ -298,9 +283,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  void _handleMealTap(int dayIndex, int mealIndex, plan, Map<String, Recipe> recipeMap) {
+  void _handleMealTap(int dayIndex, int mealIndex, dynamic plan, Map<String, Recipe> recipeMap) {
     final globalMealIndex = dayIndex * plan.days[0].meals.length + mealIndex;
-    
+
     setState(() {
       if (selectedMealIndex == globalMealIndex) {
         // Same meal tapped - open swap drawer
@@ -379,27 +364,30 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  List<SwapOption> _generateMockSwapOptions(Recipe currentRecipe, Map<String, Recipe> recipeMap) {
+  List<SwapOption> _generateMockSwapOptions(
+      Recipe currentRecipe, Map<String, Recipe> recipeMap) {
     // Mock data - will be replaced with real swap engine in Stage 3
     final alternatives = recipeMap.values
         .where((r) => r.id != currentRecipe.id)
         .take(3)
-        .map((r) => SwapOption(
-          recipe: r,
-          reasons: [
-            const SwapReason(
-              type: SwapReasonType.cheaper,
-              description: 'Save \$2.50/week',
-            ),
-            const SwapReason(
-              type: SwapReasonType.higherProtein,
-              description: '+15g protein',
-            ),
-          ],
-          costDeltaCents: -250,
-          proteinDeltaG: 15,
-          kcalDelta: -50,
-        ))
+        .map(
+          (r) => SwapOption(
+            recipe: r,
+            reasons: const [
+              SwapReason(
+                type: SwapReasonType.cheaper,
+                description: 'Save \$2.50/week',
+              ),
+              SwapReason(
+                type: SwapReasonType.higherProtein,
+                description: '+15g protein',
+              ),
+            ],
+            costDeltaCents: -250,
+            proteinDeltaG: 15,
+            kcalDelta: -50,
+          ),
+        )
         .toList();
 
     return alternatives;

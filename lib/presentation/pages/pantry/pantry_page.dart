@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../router/app_router.dart';
 // import '../../providers/pantry_providers.dart';
 // import '../../providers/ingredient_providers.dart';
 import '../../widgets/pantry_widgets/pantry_item_card.dart';
@@ -109,11 +111,22 @@ class _PantryPageState extends ConsumerState<PantryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go(AppRouter.home);
+            }
+          },
+        ),
         title: Row(
-          children: [
-            const Text('Pantry'),
-            const SizedBox(width: 8),
-            const ProBadge(),
+          children: const [
+            Text('Pantry'),
+            SizedBox(width: 8),
+            ProBadge(),
           ],
         ),
         backgroundColor: Colors.transparent,
@@ -133,133 +146,133 @@ class _PantryPageState extends ConsumerState<PantryPage> {
     final totalValue = _calculateTotalValue();
 
     return Column(
-        children: [
-          // Action bar
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Pantry-first planning saves money by using items you already have',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      children: [
+        // Action bar
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Pantry-first planning saves money by using items you already have',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              IconButton(
+                onPressed: _showAddItemDialog,
+                icon: const Icon(Icons.add),
+                tooltip: 'Add Item',
+              ),
+              PopupMenuButton(
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'clear_expired',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_sweep),
+                        SizedBox(width: 8),
+                        Text('Clear Expired'),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                IconButton(
-                  onPressed: _showAddItemDialog,
-                  icon: const Icon(Icons.add),
-                  tooltip: 'Add Item',
-                ),
-                PopupMenuButton(
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'clear_expired',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_sweep),
-                          SizedBox(width: 8),
-                          Text('Clear Expired'),
-                        ],
-                      ),
+                  PopupMenuItem(
+                    value: 'export',
+                    child: Row(
+                      children: [
+                        Icon(Icons.share),
+                        SizedBox(width: 8),
+                        Text('Export List'),
+                      ],
                     ),
-                    const PopupMenuItem(
-                      value: 'export',
-                      child: Row(
-                        children: [
-                          Icon(Icons.share),
-                          SizedBox(width: 8),
-                          Text('Export List'),
-                        ],
-                      ),
-                    ),
-                  ],
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'clear_expired':
-                        _clearExpiredItems();
-                        break;
-                      case 'export':
-                        _exportPantryList();
-                        break;
-                    }
+                  ),
+                ],
+                onSelected: (value) {
+                  switch (value) {
+                    case 'clear_expired':
+                      _clearExpiredItems();
+                      break;
+                    case 'export':
+                      _exportPantryList();
+                      break;
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+
+        // Summary cards
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: const [
+              Expanded(
+                child: _SummaryCard(
+                  title: 'Total Items',
+                  value: '—',
+                  icon: Icons.kitchen,
+                  color: Colors.blue,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: _SummaryCard(
+                  title: 'Expiring Soon',
+                  value: '—',
+                  icon: Icons.warning,
+                  color: Colors.orange,
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: _SummaryCard(
+                  title: 'Total Value',
+                  value: '\$—',
+                  icon: Icons.attach_money,
+                  color: Colors.green,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Filters
+        _buildFilters(),
+
+        const SizedBox(height: 8),
+
+        // Pantry items list
+        Expanded(
+          child: filteredItems.isEmpty
+              ? _buildEmptyState()
+              : ListView.builder(
+                  itemCount: filteredItems.length,
+                  itemBuilder: (context, index) {
+                    final pantryItem = filteredItems[index];
+                    final ingredient = _getIngredientById(pantryItem.ingredientId);
+
+                    if (ingredient == null) return const SizedBox.shrink();
+
+                    return PantryItemCard(
+                      pantryItem: pantryItem,
+                      ingredient: ingredient,
+                      onQuantityChanged: (quantity) {
+                        _updateItemQuantity(pantryItem, quantity);
+                      },
+                      onRemove: () {
+                        _removeItem(pantryItem);
+                      },
+                    );
                   },
                 ),
-              ],
-            ),
-          ),
-
-          // Summary cards
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _SummaryCard(
-                    title: 'Total Items',
-                    value: totalItems.toString(),
-                    icon: Icons.kitchen,
-                    color: Colors.blue,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _SummaryCard(
-                    title: 'Expiring Soon',
-                    value: expiringItems.toString(),
-                    icon: Icons.warning,
-                    color: Colors.orange,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _SummaryCard(
-                    title: 'Total Value',
-                    value: '\$${totalValue.toStringAsFixed(0)}',
-                    icon: Icons.attach_money,
-                    color: Colors.green,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Filters
-          _buildFilters(),
-
-          const SizedBox(height: 8),
-
-          // Pantry items list
-          Expanded(
-            child: filteredItems.isEmpty
-                ? _buildEmptyState()
-                : ListView.builder(
-                    itemCount: filteredItems.length,
-                    itemBuilder: (context, index) {
-                      final pantryItem = filteredItems[index];
-                      final ingredient = _getIngredientById(pantryItem.ingredientId);
-                      
-                      if (ingredient == null) return const SizedBox.shrink();
-                      
-                      return PantryItemCard(
-                        pantryItem: pantryItem,
-                        ingredient: ingredient,
-                        onQuantityChanged: (quantity) {
-                          _updateItemQuantity(pantryItem, quantity);
-                        },
-                        onRemove: () {
-                          _removeItem(pantryItem);
-                        },
-                      );
-                    },
-                  ),
-          ),
-        ],
-      );
+        ),
+      ],
+    );
   }
 
   Widget _buildFilters() {
@@ -276,9 +289,9 @@ class _PantryPageState extends ConsumerState<PantryPage> {
               border: OutlineInputBorder(),
             ),
           ),
-          
+
           const SizedBox(height: 12),
-          
+
           // Filter chips
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -344,8 +357,8 @@ class _PantryPageState extends ConsumerState<PantryPage> {
                 : 'Add ingredients you have on hand to get started',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -391,10 +404,10 @@ class _PantryPageState extends ConsumerState<PantryPage> {
   Ingredient? _getIngredientById(String id) {
     try {
       return _mockIngredients.firstWhere((ingredient) => ingredient.id == id);
-    } catch (e) {
+    } catch (_) {
       return null;
     }
-  }
+    }
 
   List<String> _getAvailableAisles() {
     return _mockPantryItems
@@ -435,7 +448,7 @@ class _PantryPageState extends ConsumerState<PantryPage> {
               addedAt: DateTime.now(),
             ));
           });
-          
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Added ${ingredient.name} to pantry'),
@@ -465,7 +478,7 @@ class _PantryPageState extends ConsumerState<PantryPage> {
     setState(() {
       _mockPantryItems.remove(item);
     });
-    
+
     final ingredient = _getIngredientById(item.ingredientId);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -561,24 +574,20 @@ class _SummaryCard extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            Icon(
-              icon,
-              color: color,
-              size: 24,
-            ),
+            Icon(icon, color: color, size: 24),
             const SizedBox(height: 8),
             Text(
               value,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
             ),
             Text(
               title,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
               textAlign: TextAlign.center,
             ),
           ],

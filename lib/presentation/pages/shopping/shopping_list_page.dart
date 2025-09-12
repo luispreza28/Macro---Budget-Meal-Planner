@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../router/app_router.dart'; // <-- needed for AppRouter.*
 import '../../providers/billing_providers.dart';
 import '../../widgets/shopping_widgets/shopping_item_card.dart';
 import '../../widgets/shopping_widgets/aisle_section.dart';
@@ -124,6 +125,17 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         title: const Text('Shopping List'),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go(AppRouter.plan);
+            }
+          },
+        ),
         actions: [
           IconButton(
             onPressed: _toggleCheckedItemsVisibility,
@@ -246,10 +258,16 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
             ),
       floatingActionButton: checkedCount == shoppingItems.length
           ? FloatingActionButton.extended(
-              onPressed: () => context.pop(),
-              icon: const Icon(Icons.check),
-              label: const Text('Done Shopping'),
-              backgroundColor: Colors.green,
+              onPressed: () {
+                if (context.canPop()) {
+                  context.pop();
+              } else {
+                context.go(AppRouter.home);
+              }
+            },
+            icon: const Icon(Icons.check),
+            label: const Text('Done Shopping'),
+            backgroundColor: Colors.green,
             )
           : null,
     );
