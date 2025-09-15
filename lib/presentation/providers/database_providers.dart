@@ -16,6 +16,7 @@ import '../../domain/repositories/user_targets_repository.dart';
 import '../../domain/repositories/pantry_repository.dart';
 import '../../domain/repositories/plan_repository.dart';
 import '../../domain/repositories/price_override_repository.dart';
+import '../../data/repositories/in_memory_user_targets_repository.dart';
 
 /// Provider for the app database instance
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -41,9 +42,8 @@ final recipeRepositoryProvider = Provider<RecipeRepository>((ref) {
 
 /// ✅ Provider for user targets repository (wired to concrete impl)
 final userTargetsRepositoryProvider = Provider<UserTargetsRepository>((ref) {
-  final db = ref.watch(databaseProvider);
   final prefs = ref.watch(sharedPreferencesProvider);
-  return UserTargetsRepositoryImpl(db, prefs);
+  return InMemoryUserTargetsRepository(prefs);
 });
 
 /// Provider for pantry repository - still disabled until impl is ready

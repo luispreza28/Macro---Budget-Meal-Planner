@@ -30,17 +30,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
     return Scaffold(
       appBar: AppBar(
+        // NEW: Always show a back button (works whether we can pop or not)
+        leading: Builder(
+          builder: (context) {
+            if (context.canPop()) {
+              return IconButton(
+                icon: const Icon(Icons.arrow_back),
+                tooltip: 'Back',
+                onPressed: () => context.pop(),
+              );
+            }
+            return IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Home',
+              onPressed: () => context.go(AppRouter.home),
+            );
+          },
+        ),
         title: const Text('Settings'),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: Navigator.of(context).canPop() ? const BackButton() : null,
       ),
       body: ListView(
         children: [
           // User Profile Section
           userTargetsAsync.when(
             loading: () => const _LoadingSection(),
-            error: (error, stack) => _ErrorSection(error: error.toString()),
+            error: (error, stack) => _ErrorSection(error: error.toString() ),
             data: (targets) => _UserProfileSection(targets: targets),
           ),
 
