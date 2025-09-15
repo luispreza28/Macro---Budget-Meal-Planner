@@ -37,17 +37,20 @@ class OnboardingState {
   final PlanningMode planningMode;
   final bool isCustomMacros;
 
+  // Sentinel to allow setting nullable fields to null in copyWith
+  static const Object _unset = Object();
+
   OnboardingState copyWith({
     int? currentStep,
-    String? selectedGoal,
-    double? bodyWeightLbs,
+    Object? selectedGoal = _unset,   // String? or null (clear)
+    Object? bodyWeightLbs = _unset,  // double? or null (clear)
     double? kcal,
     double? proteinG,
     double? carbsG,
     double? fatG,
-    int? budgetCents,
+    Object? budgetCents = _unset,    // int? or null (clear)
     int? mealsPerDay,
-    int? timeCapMins,
+    Object? timeCapMins = _unset,    // int? or null (clear)
     Set<String>? dietFlags,
     Set<String>? equipment,
     PlanningMode? planningMode,
@@ -55,15 +58,23 @@ class OnboardingState {
   }) {
     return OnboardingState(
       currentStep: currentStep ?? this.currentStep,
-      selectedGoal: selectedGoal ?? this.selectedGoal,
-      bodyWeightLbs: bodyWeightLbs ?? this.bodyWeightLbs,
+      selectedGoal: identical(selectedGoal, _unset)
+          ? this.selectedGoal
+          : selectedGoal as String?,
+      bodyWeightLbs: identical(bodyWeightLbs, _unset)
+          ? this.bodyWeightLbs
+          : bodyWeightLbs as double?,
       kcal: kcal ?? this.kcal,
       proteinG: proteinG ?? this.proteinG,
       carbsG: carbsG ?? this.carbsG,
       fatG: fatG ?? this.fatG,
-      budgetCents: budgetCents ?? this.budgetCents,
+      budgetCents: identical(budgetCents, _unset)
+          ? this.budgetCents
+          : budgetCents as int?,
       mealsPerDay: mealsPerDay ?? this.mealsPerDay,
-      timeCapMins: timeCapMins ?? this.timeCapMins,
+      timeCapMins: identical(timeCapMins, _unset)
+          ? this.timeCapMins
+          : timeCapMins as int?,
       dietFlags: dietFlags ?? this.dietFlags,
       equipment: equipment ?? this.equipment,
       planningMode: planningMode ?? this.planningMode,
@@ -127,7 +138,7 @@ class OnboardingController extends StateNotifier<OnboardingState> {
 
   void setGoal(String goal) {
     state = state.copyWith(selectedGoal: goal);
-    
+
     // Set default planning mode based on goal
     PlanningMode mode;
     switch (goal) {
@@ -148,7 +159,7 @@ class OnboardingController extends StateNotifier<OnboardingState> {
 
   void setBodyWeight(double weight) {
     state = state.copyWith(bodyWeightLbs: weight);
-    
+
     // Auto-calculate macros based on goal and body weight
     if (state.selectedGoal != null && state.selectedGoal != 'custom') {
       _calculateMacrosFromGoal(weight);
@@ -173,7 +184,8 @@ class OnboardingController extends StateNotifier<OnboardingState> {
       case 'bulking_no_budget':
         final targets = UserTargets.bulkingPreset(
           bodyWeightLbs: bodyWeightLbs,
-          budgetCents: state.selectedGoal == 'bulking_budget' ? 8500 : null, // $85/week
+          budgetCents:
+              state.selectedGoal == 'bulking_budget' ? 8500 : null, // $85/week
         );
         state = state.copyWith(
           kcal: targets.kcal,
@@ -229,7 +241,7 @@ class OnboardingController extends StateNotifier<OnboardingState> {
 }
 
 /// Provider for onboarding controller
-final onboardingControllerProvider = 
+final onboardingControllerProvider =
     StateNotifierProvider<OnboardingController, OnboardingState>((ref) {
   return OnboardingController();
 });
