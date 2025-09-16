@@ -181,8 +181,9 @@ class AppDatabase extends _$AppDatabase {
       await customStatement(
         'CREATE INDEX IF NOT EXISTS idx_ingredients_price ON ingredients (price_per_unit_cents)',
       );
+      // FIX: correct column name is protein_per100g (no underscore before 100g)
       await customStatement(
-        'CREATE INDEX IF NOT EXISTS idx_ingredients_protein ON ingredients (protein_per_100g)',
+        'CREATE INDEX IF NOT EXISTS idx_ingredients_protein ON ingredients (protein_per100g)',
       );
       await customStatement(
         'CREATE INDEX IF NOT EXISTS idx_recipes_time ON recipes (time_mins)',
@@ -209,24 +210,24 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (Migrator m, int from, int to) async {
       // Handle future database migrations here
       if (from <= 1 && to >= 2) {
-        // Add indexes if they don't exist (for upgrades from v1)
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_ingredients_aisle ON ingredients (aisle)',
         );
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_ingredients_price ON ingredients (price_per_unit_cents)',
         );
-        // Add other indexes...
+        // Add the corrected protein index for upgraded installs too
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_ingredients_protein ON ingredients (protein_per100g)',
+        );
       }
     },
     beforeOpen: (details) async {
       // Basic SQLite configuration
-      // More advanced PRAGMA settings will be added in future versions
     },
   );
 }
 
-/// Opens a connection to the SQLite database
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
     final dbFolder = await getApplicationDocumentsDirectory();
