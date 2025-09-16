@@ -56,35 +56,33 @@ class DatabaseMigrationService {
 
   /// Migration to version 2 - Example: Add indexes for better performance
   Future<void> _migrateToV2(Migrator m) async {
-    // Add indexes for frequently queried columns
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_ingredients_aisle ON ingredients (aisle)',
     );
-    
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_ingredients_price ON ingredients (price_per_unit_cents)',
     );
-    
+    // NEW: corrected column name
+    await m.database.customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_ingredients_protein ON ingredients (protein_per100g)',
+    );
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_recipes_time ON recipes (time_mins)',
     );
-    
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_recipes_cost ON recipes (cost_per_serv_cents)',
     );
-    
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_plans_created_at ON plans (created_at)',
     );
-    
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_pantry_items_ingredient_id ON pantry_items (ingredient_id)',
     );
-    
     await m.database.customStatement(
       'CREATE INDEX IF NOT EXISTS idx_price_overrides_ingredient_id ON price_overrides (ingredient_id)',
     );
   }
+
 
   /// Migration to version 3 - Example: Add new columns or tables
   Future<void> _migrateToV3(Migrator m) async {
