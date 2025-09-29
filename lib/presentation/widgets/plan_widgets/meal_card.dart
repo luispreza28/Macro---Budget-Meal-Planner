@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../domain/entities/recipe.dart';
+import '../../../domain/entities/ingredient.dart'; // Unit & Ingredient here
 
 /// Card displaying a meal in the plan grid
 class MealCard extends StatelessWidget {
@@ -8,8 +9,10 @@ class MealCard extends StatelessWidget {
     required this.recipe,
     required this.servings,
     required this.onTap,
+    this.ingredients = const {}, // optional map for pretty names
     this.isSelected = false,
     this.showMacros = true,
+    this.ingredientNameById = const {},
   });
 
   final Recipe recipe;
@@ -17,6 +20,12 @@ class MealCard extends StatelessWidget {
   final VoidCallback onTap;
   final bool isSelected;
   final bool showMacros;
+
+  /// ingredientId -> user-facing name (optional, used if provided)
+  final Map<String, String> ingredientNameById;
+
+  /// Optional: ingredientId -> Ingredient (used to show nicer names if available)
+  final Map<String, Ingredient> ingredients;
 
   @override
   Widget build(BuildContext context) {
@@ -43,15 +52,15 @@ class MealCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Recipe name and servings
+                // Title + servings chip
                 Row(
                   children: [
                     Expanded(
                       child: Text(
                         recipe.name,
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                              fontWeight: FontWeight.w600,
+                            ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -64,52 +73,42 @@ class MealCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
-                          '${servings.toStringAsFixed(servings.truncateToDouble() == servings ? 0 : 1)}x',
+                          _trimZeros(servings) + 'x',
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onPrimaryContainer,
-                          ),
+                                color: Theme.of(context).colorScheme.onPrimaryContainer,
+                              ),
                         ),
                       ),
                   ],
                 ),
-                
+
                 const SizedBox(height: 8),
-                
-                // Time and cost
+
+                // Time & cost
                 Row(
                   children: [
-                    Icon(
-                      Icons.access_time,
-                      size: 14,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                    Icon(Icons.access_time, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     const SizedBox(width: 4),
                     Text(
                       '${recipe.timeMins} min',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                     ),
                     const Spacer(),
-                    Icon(
-                      Icons.attach_money,
-                      size: 14,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                    Icon(Icons.attach_money, size: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
                     Text(
                       '\$${totalCost.toStringAsFixed(2)}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w500,
-                      ),
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                          ),
                     ),
                   ],
                 ),
-                
+
                 if (showMacros) ...[
                   const SizedBox(height: 8),
-                  
-                  // Macros
                   Row(
                     children: [
                       _MacroChip(
@@ -124,8 +123,8 @@ class MealCard extends StatelessWidget {
                     ],
                   ),
                 ],
-                
-                // Diet flags
+
+                // Flags
                 if (recipe.dietFlags.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Wrap(
@@ -140,14 +139,26 @@ class MealCard extends StatelessWidget {
                         child: Text(
                           _getFlagDisplayName(flag),
                           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            fontSize: 9,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                                fontSize: 9,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
                         ),
                       );
                     }).toList(),
                   ),
                 ],
+
+                const SizedBox(height: 8),
+
+                // Show measurements button
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () => _showMeasurements(context),
+                    icon: const Icon(Icons.scale),
+                    label: const Text('Show measurements'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -156,15 +167,151 @@ class MealCard extends StatelessWidget {
     );
   }
 
+  void _showMeasurements(BuildContext context) {
+    final hasRealItems = recipe.items.isNotEmpty;
+    final List<RecipeItem> items = hasRealItems ? recipe.items : _fallbackItems();
+
+    if (items.isEmpty) {
+      showModalBottomSheet(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => const _SimpleSheetMessage(
+          title: 'Ingredients',
+          message:
+              'Measurements for this recipe are not available yet. They will appear once the recipe includes ingredient details.',
+        ),
+      );
+      return;
+    }
+
+    final title =
+        'Ingredients • ${_trimZeros(servings)}× serving${servings == 1 ? '' : 's'}';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Text(
+                    recipe.name,
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: Text(
+                    title,
+                    style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                          color: Theme.of(ctx).colorScheme.primary,
+                        ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const Divider(height: 12, thickness: 0.5),
+                    itemBuilder: (_, i) {
+                      final it = items[i];
+
+                      final name =
+                          ingredients[it.ingredientId]?.name ??
+                          ingredientNameById[it.ingredientId] ??
+                          _humanizeId(it.ingredientId);
+
+                      final qty = it.qty * servings; // per-serving * servings
+                      final unit = it.unit;
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              name,
+                              style: Theme.of(ctx).textTheme.bodyMedium,
+                            ),
+                          ),
+                          Text(
+                            _formatQty(qty, unit),
+                            style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Done'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Now returns an empty list (no external constant needed).
+  List<RecipeItem> _fallbackItems() => const <RecipeItem>[];
+
+  String _trimZeros(double n) {
+    final s = n.toStringAsFixed(1);
+    return s.endsWith('.0') ? n.toStringAsFixed(0) : s;
+    }
+
+  String _formatQty(double qty, Unit unit) {
+    final rounded = (qty * 10).round() / 10.0;
+    final numStr = (rounded % 1 == 0)
+        ? rounded.toStringAsFixed(0)
+        : rounded.toStringAsFixed(1);
+    switch (unit) {
+      case Unit.grams:
+        return '$numStr g';
+      case Unit.milliliters:
+        return '$numStr ml';
+      case Unit.piece:
+        return '$numStr pc';
+    }
+  }
+
+  String _humanizeId(String id) =>
+      id.replaceAll('_', ' ').replaceAll('-', ' ');
+
   String _getFlagDisplayName(String flag) {
     switch (flag.toLowerCase()) {
       case 'vegetarian':
+      case 'veg':
         return 'VEG';
       case 'vegan':
         return 'VEGAN';
       case 'gluten_free':
+      case 'gf':
         return 'GF';
       case 'dairy_free':
+      case 'df':
         return 'DF';
       case 'keto':
         return 'KETO';
@@ -175,17 +322,14 @@ class MealCard extends StatelessWidget {
       case 'nut_free':
         return 'NF';
       default:
-        return flag.toUpperCase().substring(0, 3);
+        final up = flag.toUpperCase();
+        return up.length <= 3 ? up : up.substring(0, 3);
     }
   }
 }
 
 class _MacroChip extends StatelessWidget {
-  const _MacroChip({
-    required this.label,
-    required this.color,
-  });
-
+  const _MacroChip({required this.label, required this.color});
   final String label;
   final Color color;
 
@@ -201,9 +345,53 @@ class _MacroChip extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w500,
-          fontSize: 10,
+              color: color,
+              fontWeight: FontWeight.w500,
+              fontSize: 10,
+            ),
+      ),
+    );
+  }
+}
+
+/// Simple one-message bottom sheet used when nothing to show.
+class _SimpleSheetMessage extends StatelessWidget {
+  const _SimpleSheetMessage({required this.title, required this.message});
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text(message, style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Done'),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,26 +1,31 @@
-import 'package:uuid/uuid.dart';
+// lib/data/services/plan_generation_service.dart
+import 'dart:math';
 
 import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
+import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/user_targets.dart';
 
-/// Very simple plan generator:
-/// - Creates a 7-day plan
-/// - Uses `mealsPerDay` meals/day
-/// - Cycles through available recipes (1 serving each)
-/// - Computes totals from recipe macros & costs
+/// Generator that prefers real recipe.items to compute macros & cost.
+/// Falls back to Recipe.macrosPerServ and costPerServCents if items are missing.
 class PlanGenerationService {
   Plan generate({
     required UserTargets targets,
     required List<Recipe> recipes,
+    required List<Ingredient> ingredients,
   }) {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
     }
 
-    final mealsPerDay = targets.mealsPerDay;
-    final start = DateTime.now();
-    final days = <PlanDay>[];
+    final ingById = {for (final i in ingredients) i.id: i};
+
+    final mealsPerDay = targets.mealsPerDay.clamp(2, 5);
+    final rng = Random();
+    final pool = [...recipes]..shuffle(rng);
+
+    final List<PlanDay> days = [];
+    int mealCursor = 0;
 
     double totalKcal = 0;
     double totalProtein = 0;
@@ -28,31 +33,40 @@ class PlanGenerationService {
     double totalFat = 0;
     int totalCostCents = 0;
 
-    int recipeIndex = 0;
-
     for (int d = 0; d < 7; d++) {
-      final dayDate = DateTime(start.year, start.month, start.day).add(Duration(days: d));
-      final meals = <PlanMeal>[];
-
+      final List<PlanMeal> meals = [];
       for (int m = 0; m < mealsPerDay; m++) {
-        final recipe = recipes[recipeIndex % recipes.length];
-        recipeIndex++;
+        final recipe = pool[mealCursor % pool.length];
+        mealCursor++;
 
-        // One serving per meal for now.
-        meals.add(PlanMeal(recipeId: recipe.id, servings: 1));
+        final servings = 1.0;
 
-        // Totals accumulate
-        totalKcal += recipe.macrosPerServ.kcal;
-        totalProtein += recipe.macrosPerServ.proteinG;
-        totalCarbs += recipe.macrosPerServ.carbsG;
-        totalFat += recipe.macrosPerServ.fatG;
-        totalCostCents += recipe.costPerServCents;
+        final _Totals t = _computeFromRecipe(
+          recipe: recipe,
+          servings: servings,
+          ingById: ingById,
+        );
+
+        totalKcal += t.kcal;
+        totalProtein += t.proteinG;
+        totalCarbs += t.carbsG;
+        totalFat += t.fatG;
+        totalCostCents += t.costCents;
+
+        meals.add(PlanMeal(
+          recipeId: recipe.id,
+          servings: servings,
+        ));
       }
 
-      days.add(PlanDay(date: dayDate.toIso8601String().split('T').first, meals: meals));
+      final date = DateTime.now().add(Duration(days: d));
+      days.add(PlanDay(
+        date: date.toIso8601String(),
+        meals: meals,
+      ));
     }
 
-    final totals = PlanTotals(
+    final planTotals = PlanTotals(
       kcal: totalKcal,
       proteinG: totalProtein,
       carbsG: totalCarbs,
@@ -60,17 +74,83 @@ class PlanGenerationService {
       costCents: totalCostCents,
     );
 
-    final id = const Uuid().v4();
-    final name =
-        'Week of ${DateTime(start.year, start.month, start.day).toIso8601String().split('T').first}';
-
+    // Remove `updatedAt:` — the Plan constructor in your domain model
+    // does not accept it.
     return Plan(
-      id: id,
-      name: name,
+      id: 'plan_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Weekly Plan',
       userTargetsId: targets.id,
       days: days,
-      totals: totals,
+      totals: planTotals,
       createdAt: DateTime.now(),
     );
+  }
+
+  _Totals _computeFromRecipe({
+    required Recipe recipe,
+    required double servings,
+    required Map<String, Ingredient> ingById,
+  }) {
+    if (recipe.items.isNotEmpty) {
+      double kcal = 0, protein = 0, carbs = 0, fat = 0;
+      double costCentsDouble = 0;
+
+      for (final it in recipe.items) {
+        final ing = ingById[it.ingredientId];
+        if (ing == null) continue;
+
+        final qty = it.qty * servings;
+
+        double baseQtyFor100;
+        switch (it.unit) {
+          case Unit.grams:
+          case Unit.milliliters:
+            baseQtyFor100 = qty / 100.0;
+            break;
+          case Unit.piece:
+            baseQtyFor100 = qty; // assume 1 pc ~ 100g unless you add per-piece data
+            break;
+        }
+
+        kcal += ing.macrosPer100g.kcal * baseQtyFor100;
+        protein += ing.macrosPer100g.proteinG * baseQtyFor100;
+        carbs += ing.macrosPer100g.carbsG * baseQtyFor100;
+        fat += ing.macrosPer100g.fatG * baseQtyFor100;
+
+        final unitsOf100 = (it.unit == Unit.piece) ? qty : qty / 100.0;
+        costCentsDouble += unitsOf100 * ing.pricePerUnitCents;
+      }
+
+      return _Totals(
+        kcal: kcal,
+        proteinG: protein,
+        carbsG: carbs,
+        fatG: fat,
+        costCents: costCentsDouble.round(),
+      );
+    } else {
+      return _Totals(
+        kcal: recipe.macrosPerServ.kcal * servings,
+        proteinG: recipe.macrosPerServ.proteinG * servings,
+        carbsG: recipe.macrosPerServ.carbsG * servings,
+        fatG: recipe.macrosPerServ.fatG * servings,
+        costCents: (recipe.costPerServCents * servings).round(),
+      );
     }
+  }
+}
+
+class _Totals {
+  final double kcal;
+  final double proteinG;
+  final double carbsG;
+  final double fatG;
+  final int costCents;
+  _Totals({
+    required this.kcal,
+    required this.proteinG,
+    required this.carbsG,
+    required this.fatG,
+    required this.costCents,
+  });
 }

@@ -12,6 +12,10 @@ import '../../widgets/plan_widgets/swap_drawer.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../providers/database_providers.dart';
 
+// NEW: watch ingredients so we can pass them into WeeklyPlanGrid
+import '../../providers/ingredient_providers.dart';
+import '../../../domain/entities/ingredient.dart';
+
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
   const PlanPage({super.key});
@@ -29,22 +33,19 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     final currentPlanAsync = ref.watch(currentPlanProvider);
     final userTargetsAsync = ref.watch(currentUserTargetsProvider);
     final recipesAsync = ref.watch(allRecipesProvider);
+    final ingredientsAsync = ref.watch(allIngredientsProvider); // <— NEW
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Weekly Plan'),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              context.pop();
-            } else {
-              context.go(AppRouter.home);
-            }
-          },
-        ),
+        leading: Navigator.of(context).canPop()
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => context.pop(),
+              )
+            : null,
         actions: [
           IconButton(
             onPressed: () => context.go(AppRouter.shoppingList),
@@ -114,55 +115,64 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, stack) => _buildErrorState(error.toString()),
                 data: (recipes) {
-                  final recipeMap = {for (var r in recipes) r.id: r};
+                  // Wait for ingredients too
+                  return ingredientsAsync.when(
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (error, stack) => _buildErrorState(error.toString()),
+                    data: (ingredients) {
+                      final recipeMap = {for (var r in recipes) r.id: r};
+                      final ingredientMap = {for (var i in ingredients) i.id: i};
 
-                  return Stack(
-                    children: [
-                      Column(
+                      return Stack(
                         children: [
-                          // Totals bar
-                          TotalsBar(
-                            targets: targets,
-                            actualKcal: plan.totals.kcal / 7, // Daily average
-                            actualProteinG: plan.totals.proteinG / 7,
-                            actualCarbsG: plan.totals.carbsG / 7,
-                            actualFatG: plan.totals.fatG / 7,
-                            actualCostCents: (plan.totals.costCents / 7).round(),
-                            showBudget: targets.budgetCents != null,
+                          Column(
+                            children: [
+                              // Totals bar
+                              TotalsBar(
+                                targets: targets,
+                                actualKcal: plan.totals.kcal / 7, // Daily average
+                                actualProteinG: plan.totals.proteinG / 7,
+                                actualCarbsG: plan.totals.carbsG / 7,
+                                actualFatG: plan.totals.fatG / 7,
+                                actualCostCents: (plan.totals.costCents / 7).round(),
+                                showBudget: targets.budgetCents != null,
+                              ),
+
+                              // Plan grid
+                              Expanded(
+                                child: WeeklyPlanGrid(
+                                  plan: plan,
+                                  recipes: recipeMap,
+                                  ingredients: ingredientMap, // <— NEW required param
+                                  selectedMealIndex: selectedMealIndex,
+                                  onMealTap: (dayIndex, mealIndex) {
+                                    _handleMealTap(dayIndex, mealIndex, plan, recipeMap);
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
 
-                          // Plan grid
-                          Expanded(
-                            child: WeeklyPlanGrid(
-                              plan: plan,
-                              recipes: recipeMap,
-                              selectedMealIndex: selectedMealIndex,
-                              onMealTap: (dayIndex, mealIndex) {
-                                _handleMealTap(dayIndex, mealIndex, plan, recipeMap);
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      // Swap drawer
-                      if (isSwapDrawerOpen && selectedMealIndex != null)
-                        Positioned.fill(
-                          child: GestureDetector(
-                            onTap: _closeSwapDrawer,
-                            child: Container(
-                              color: Colors.black.withOpacity(0.5),
-                              child: Align(
-                                alignment: Alignment.bottomCenter,
-                                child: GestureDetector(
-                                  onTap: () {}, // Prevent closing when tapping drawer
-                                  child: _buildSwapDrawer(plan, recipeMap),
+                          // Swap drawer
+                          if (isSwapDrawerOpen && selectedMealIndex != null)
+                            Positioned.fill(
+                              child: GestureDetector(
+                                onTap: _closeSwapDrawer,
+                                child: Container(
+                                  color: Colors.black.withOpacity(0.5),
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: GestureDetector(
+                                      onTap: () {}, // Prevent closing when tapping drawer
+                                      child: _buildSwapDrawer(plan, recipeMap),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                    ],
+                        ],
+                      );
+                    },
                   );
                 },
               );
@@ -245,10 +255,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
   }
 
   Widget _buildSwapDrawer(plan, Map<String, Recipe> recipeMap) {
+    // Get current meal details
     int dayIndex = 0;
     int mealIndex = 0;
     int currentIndex = 0;
 
+    // Find the selected meal
     for (int d = 0; d < plan.days.length; d++) {
       final day = plan.days[d];
       for (int m = 0; m < day.meals.length; m++) {
@@ -268,6 +280,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       return const SizedBox.shrink();
     }
 
+    // Mock swap options (placeholder)
     final alternatives = _generateMockSwapOptions(currentRecipe, recipeMap);
 
     return SwapDrawer(
@@ -285,8 +298,10 @@ class _PlanPageState extends ConsumerState<PlanPage> {
 
     setState(() {
       if (selectedMealIndex == globalMealIndex) {
+        // Same meal tapped - open swap drawer
         isSwapDrawerOpen = true;
       } else {
+        // Different meal selected
         selectedMealIndex = globalMealIndex.toInt();
         isSwapDrawerOpen = false;
       }
@@ -300,6 +315,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
   }
 
   void _handleSwapSelected(int dayIndex, int mealIndex, Recipe newRecipe) {
+    // Implement swapping later
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Swapped to ${newRecipe.name}'),
@@ -311,133 +327,14 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  // -------- NEW: seed minimal recipes if DB is empty --------
-  Future<void> _ensureSeedRecipesIfEmpty() async {
-    final repo = ref.read(recipeRepositoryProvider);
-    final count = await repo.getRecipesCount();
-    if (count > 0) return;
-
-    final seeds = <Recipe>[
-      Recipe(
-        id: 'seed_oatmeal_pb',
-        name: 'Peanut Butter Oatmeal',
-        servings: 1,
-        timeMins: 8,
-        cuisine: 'American',
-        dietFlags: const ['quick', 'high_volume'],
-        items: const [],
-        steps: const ['Cook oats with water/milk', 'Stir in peanut butter'],
-        macrosPerServ: const MacrosPerServing(kcal: 400, proteinG: 18, carbsG: 55, fatG: 12),
-        costPerServCents: 120,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_chicken_rice',
-        name: 'Chicken & Rice',
-        servings: 1,
-        timeMins: 25,
-        cuisine: 'American',
-        dietFlags: const ['high_protein'],
-        items: const [],
-        steps: const ['Cook rice', 'Sauté chicken, combine'],
-        macrosPerServ: const MacrosPerServing(kcal: 550, proteinG: 45, carbsG: 65, fatG: 12),
-        costPerServCents: 250,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_yogurt_bowl',
-        name: 'Greek Yogurt Bowl',
-        servings: 1,
-        timeMins: 5,
-        cuisine: 'American',
-        dietFlags: const ['quick', 'high_protein'],
-        items: const [],
-        steps: const ['Mix yogurt, fruit, and honey'],
-        macrosPerServ: const MacrosPerServing(kcal: 300, proteinG: 22, carbsG: 35, fatG: 6),
-        costPerServCents: 180,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_veggie_omelette',
-        name: 'Veggie Omelette',
-        servings: 1,
-        timeMins: 12,
-        cuisine: 'American',
-        dietFlags: const ['quick', 'high_protein'],
-        items: const [],
-        steps: const ['Beat eggs', 'Cook with veggies'],
-        macrosPerServ: const MacrosPerServing(kcal: 350, proteinG: 24, carbsG: 6, fatG: 24),
-        costPerServCents: 160,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_tuna_sandwich',
-        name: 'Tuna Sandwich',
-        servings: 1,
-        timeMins: 7,
-        cuisine: 'American',
-        dietFlags: const ['quick'],
-        items: const [],
-        steps: const ['Mix tuna with mayo', 'Assemble sandwich'],
-        macrosPerServ: const MacrosPerServing(kcal: 420, proteinG: 28, carbsG: 45, fatG: 12),
-        costPerServCents: 210,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_pasta_bolognese',
-        name: 'Pasta Bolognese',
-        servings: 1,
-        timeMins: 30,
-        cuisine: 'Italian',
-        dietFlags: const ['calorie_dense'],
-        items: const [],
-        steps: const ['Cook pasta', 'Simmer sauce', 'Combine'],
-        macrosPerServ: const MacrosPerServing(kcal: 700, proteinG: 30, carbsG: 90, fatG: 20),
-        costPerServCents: 300,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_pb_toast',
-        name: 'PB Toast',
-        servings: 1,
-        timeMins: 3,
-        cuisine: 'American',
-        dietFlags: const ['quick'],
-        items: const [],
-        steps: const ['Toast bread', 'Spread PB'],
-        macrosPerServ: const MacrosPerServing(kcal: 320, proteinG: 12, carbsG: 28, fatG: 18),
-        costPerServCents: 80,
-        source: RecipeSource.seed,
-      ),
-      Recipe(
-        id: 'seed_bean_chili',
-        name: 'Bean Chili',
-        servings: 1,
-        timeMins: 35,
-        cuisine: 'Mexican',
-        dietFlags: const ['high_volume'],
-        items: const [],
-        steps: const ['Simmer beans with spices and tomatoes'],
-        macrosPerServ: const MacrosPerServing(kcal: 450, proteinG: 22, carbsG: 60, fatG: 12),
-        costPerServCents: 180,
-        source: RecipeSource.seed,
-      ),
-    ];
-
-    await repo.bulkInsertRecipes(seeds);
-  }
-
-  /// Generate a plan using repository data; seed recipes if needed.
+  /// Generate a new plan (now also fetching ingredients so the generator
+  /// can compute totals from recipe.items).
   Future<void> _generateNewPlan() async {
     try {
-      // Make sure we have some recipes the first time.
-      await _ensureSeedRecipesIfEmpty();
-
-      // Fetch directly from repository to avoid timing issues with streams.
-      final recipeRepo = ref.read(recipeRepositoryProvider);
-      final recipes = await recipeRepo.getAllRecipes();
-
+      final recipes = await ref.read(allRecipesProvider.future);
       final targets = await ref.read(currentUserTargetsProvider.future);
+      final ingredients = await ref.read(allIngredientsProvider.future);
+
       if (targets == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -447,7 +344,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       }
 
       final generator = ref.read(planGenerationServiceProvider);
-      final plan = generator.generate(targets: targets, recipes: recipes);
+      final plan = generator.generate(
+        targets: targets,
+        recipes: recipes,
+        ingredients: ingredients,
+      );
 
       final notifier = ref.read(planNotifierProvider.notifier);
       await notifier.savePlan(plan);
