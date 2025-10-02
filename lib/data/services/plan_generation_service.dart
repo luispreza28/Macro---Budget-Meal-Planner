@@ -1,19 +1,24 @@
 // lib/data/services/plan_generation_service.dart
 import 'dart:math';
 
+import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
-import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/user_targets.dart';
+import '../../domain/repositories/plan_repository.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
 /// Falls back to Recipe.macrosPerServ and costPerServCents if items are missing.
 class PlanGenerationService {
-  Plan generate({
+  PlanGenerationService(this._planRepository);
+
+  final PlanRepository _planRepository;
+
+  Future<Plan> generate({
     required UserTargets targets,
     required List<Recipe> recipes,
     required List<Ingredient> ingredients,
-  }) {
+  }) async {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
     }
@@ -22,7 +27,18 @@ class PlanGenerationService {
 
     final mealsPerDay = targets.mealsPerDay.clamp(2, 5);
     final rng = Random();
-    final pool = [...recipes]..shuffle(rng);
+    final all = [...recipes];
+    final List<Recipe> itemized = all.where((r) => r.items.isNotEmpty).toList();
+    final List<Recipe> nonItemized = all.where((r) => r.items.isEmpty).toList();
+
+    final List<Recipe> pickPool;
+    if (itemized.isNotEmpty) {
+      pickPool = itemized;
+    } else {
+      pickPool = nonItemized;
+    }
+
+    final pool = [...pickPool]..shuffle(rng);
 
     final List<PlanDay> days = [];
     int mealCursor = 0;
@@ -39,7 +55,7 @@ class PlanGenerationService {
         final recipe = pool[mealCursor % pool.length];
         mealCursor++;
 
-        final servings = 1.0;
+        const servings = 1.0;
 
         final _Totals t = _computeFromRecipe(
           recipe: recipe,
@@ -53,17 +69,11 @@ class PlanGenerationService {
         totalFat += t.fatG;
         totalCostCents += t.costCents;
 
-        meals.add(PlanMeal(
-          recipeId: recipe.id,
-          servings: servings,
-        ));
+        meals.add(PlanMeal(recipeId: recipe.id, servings: servings));
       }
 
       final date = DateTime.now().add(Duration(days: d));
-      days.add(PlanDay(
-        date: date.toIso8601String(),
-        meals: meals,
-      ));
+      days.add(PlanDay(date: date.toIso8601String(), meals: meals));
     }
 
     final planTotals = PlanTotals(
@@ -74,9 +84,7 @@ class PlanGenerationService {
       costCents: totalCostCents,
     );
 
-    // Remove `updatedAt:` — the Plan constructor in your domain model
-    // does not accept it.
-    return Plan(
+    final plan = Plan(
       id: 'plan_${DateTime.now().millisecondsSinceEpoch}',
       name: 'Weekly Plan',
       userTargetsId: targets.id,
@@ -84,6 +92,10 @@ class PlanGenerationService {
       totals: planTotals,
       createdAt: DateTime.now(),
     );
+
+    // Persist the generated plan before returning so it survives restarts.
+    await _planRepository.addPlan(plan);
+    return plan;
   }
 
   _Totals _computeFromRecipe({
@@ -92,7 +104,10 @@ class PlanGenerationService {
     required Map<String, Ingredient> ingById,
   }) {
     if (recipe.items.isNotEmpty) {
-      double kcal = 0, protein = 0, carbs = 0, fat = 0;
+      double kcal = 0;
+      double protein = 0;
+      double carbs = 0;
+      double fat = 0;
       double costCentsDouble = 0;
 
       for (final it in recipe.items) {
@@ -108,7 +123,7 @@ class PlanGenerationService {
             baseQtyFor100 = qty / 100.0;
             break;
           case Unit.piece:
-            baseQtyFor100 = qty; // assume 1 pc ~ 100g unless you add per-piece data
+            baseQtyFor100 = qty;
             break;
         }
 

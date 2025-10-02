@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:io';
-import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
-import 'package:flutter/services.dart';
 
 import 'logger.dart';
 
@@ -53,9 +51,9 @@ class PerformanceMonitor {
 
       final snapshot = MemorySnapshot(
         timestamp: DateTime.now(),
-        heapUsage: memInfo?['heapUsage'] ?? 0,
-        heapCapacity: memInfo?['heapCapacity'] ?? 0,
-        externalUsage: memInfo?['externalUsage'] ?? 0,
+        heapUsage: memInfo['heapUsage'] ?? 0,
+        heapCapacity: memInfo['heapCapacity'] ?? 0,
+        externalUsage: memInfo['externalUsage'] ?? 0,
       );
 
       _memoryHistory.add(snapshot);
@@ -120,9 +118,9 @@ class PerformanceMonitor {
       };
 
       return MemoryInfo(
-        heapUsage: memInfo?['heapUsage'] ?? 0,
-        heapCapacity: memInfo?['heapCapacity'] ?? 0,
-        externalUsage: memInfo?['externalUsage'] ?? 0,
+        heapUsage: memInfo['heapUsage'] ?? 0,
+        heapCapacity: memInfo['heapCapacity'] ?? 0,
+        externalUsage: memInfo['externalUsage'] ?? 0,
         timestamp: DateTime.now(),
       );
     } catch (e) {

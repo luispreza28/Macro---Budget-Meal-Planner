@@ -1,8 +1,7 @@
-import 'package:drift/drift.dart';
 
 import '../datasources/database.dart';
 import '../../core/utils/logger.dart';
-import '../../core/errors/error_handler.dart';
+import '../../core/errors/failures.dart';
 
 /// Service for managing database performance optimization
 class DatabasePerformanceService {

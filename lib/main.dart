@@ -12,40 +12,46 @@ import 'presentation/providers/database_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize error handling
   ErrorHandler.initialize();
   AppLogger.i('Application starting up');
-  
+
   // Initialize performance monitoring
   PerformanceMonitor.initialize();
-  
+
   try {
     // Initialize SharedPreferences
     final sharedPreferences = await SharedPreferences.getInstance();
     AppLogger.d('SharedPreferences initialized');
-    
+
     // Create provider container
     final container = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(sharedPreferences),
       ],
     );
-    
+
+    await container.read(dataIntegrityInitializationProvider.future);
+
     // Initialize lifecycle management
     AppLifecycleManager.initialize(container);
     AppLogger.d('App lifecycle manager initialized');
-    
+
     runApp(
       UncontrolledProviderScope(
         container: container,
         child: const MacroBudgetMealPlannerApp(),
       ),
     );
-    
+
     AppLogger.i('Application launched successfully');
   } catch (e, stackTrace) {
-    AppLogger.wtf('Failed to initialize application', error: e, stackTrace: stackTrace);
+    AppLogger.wtf(
+      'Failed to initialize application',
+      error: e,
+      stackTrace: stackTrace,
+    );
     rethrow;
   }
 }
@@ -54,10 +60,12 @@ class MacroBudgetMealPlannerApp extends ConsumerStatefulWidget {
   const MacroBudgetMealPlannerApp({super.key});
 
   @override
-  ConsumerState<MacroBudgetMealPlannerApp> createState() => _MacroBudgetMealPlannerAppState();
+  ConsumerState<MacroBudgetMealPlannerApp> createState() =>
+      _MacroBudgetMealPlannerAppState();
 }
 
-class _MacroBudgetMealPlannerAppState extends ConsumerState<MacroBudgetMealPlannerApp> {
+class _MacroBudgetMealPlannerAppState
+    extends ConsumerState<MacroBudgetMealPlannerApp> {
   @override
   void dispose() {
     AppLifecycleManager.dispose();

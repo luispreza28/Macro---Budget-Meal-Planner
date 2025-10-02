@@ -2,7 +2,6 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'logger.dart';
-import '../errors/error_handler.dart';
 
 /// Manages application lifecycle events and state persistence
 class AppLifecycleManager with WidgetsBindingObserver {

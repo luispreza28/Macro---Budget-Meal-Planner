@@ -2,8 +2,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/entities/ingredient.dart' as ing;
-import '../../domain/entities/recipe.dart' as domain;
-import '../../domain/entities/plan.dart';
+import '../providers/database_providers.dart';
 import '../providers/plan_providers.dart';
 import '../providers/recipe_providers.dart';
 import '../providers/ingredient_providers.dart';
@@ -25,88 +24,112 @@ class AggregatedShoppingItem {
 }
 
 class ShoppingAisleGroup {
-  ShoppingAisleGroup({
-    required this.aisle,
-    required this.items,
-  });
+  ShoppingAisleGroup({required this.aisle, required this.items});
 
   final ing.Aisle aisle;
   final List<AggregatedShoppingItem> items;
 }
 
-final shoppingListItemsProvider =
-    FutureProvider<List<ShoppingAisleGroup>>((ref) async {
-  final plan = await ref.watch(currentPlanProvider.future);
+/// Reactive builder: recomputes whenever plan/recipes/ingredients change.
+/// Watches the upstream streams so any change triggers a recompute.
+final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
+  ref,
+) async {
+  // Watch the STREAM providers directly so changes invalidate/recompute this provider.
+  final planAsync = ref.watch(currentPlanProvider);
+  final recipesAsync = ref.watch(allRecipesProvider);
+  final ingredientsAsync = ref.watch(allIngredientsProvider);
+
+  final plan = planAsync.value;
   if (plan == null) return const [];
 
-  final recipes = await ref.watch(allRecipesProvider.future);
-  final ingredients = await ref.watch(allIngredientsProvider.future);
+  // If streams haven’t emitted yet, fall back to repos (single shot).
+  // If they have data, use that data.
+  final recipeRepo = ref.read(recipeRepositoryProvider);
+  final ingredientRepo = ref.read(ingredientRepositoryProvider);
+
+  var recipes = recipesAsync.value;
+  recipes ??= await recipeRepo.getAllRecipes();
+
+  var ingredients = ingredientsAsync.value;
+  ingredients ??= await ingredientRepo.getAllIngredients();
+
+  if (recipes.isEmpty || ingredients.isEmpty) {
+    return const [];
+  }
 
   final recipeById = {for (final r in recipes) r.id: r};
   final ingredientById = {for (final i in ingredients) i.id: i};
-
-  // Aggregate quantities by ingredientId in the ingredient's base unit.
   final Map<String, double> totalsByIngredientId = {};
 
   for (final day in plan.days) {
     for (final meal in day.meals) {
       final recipe = recipeById[meal.recipeId];
-      if (recipe == null) continue;
+      if (recipe == null || recipe.items.isEmpty) continue;
 
       for (final item in recipe.items) {
         final ingMeta = ingredientById[item.ingredientId];
         if (ingMeta == null) continue;
 
-        // Convert item.qty to the ingredient's base unit when possible.
         final double qtyInBase = _toIngredientUnit(
           qty: item.qty * meal.servings,
           from: item.unit,
           to: ingMeta.unit,
         );
 
-        totalsByIngredientId.update(item.ingredientId, (v) => v + qtyInBase,
-            ifAbsent: () => qtyInBase);
+        totalsByIngredientId.update(
+          item.ingredientId,
+          (v) => v + qtyInBase,
+          ifAbsent: () => qtyInBase,
+        );
       }
     }
   }
 
-  // Build AggregatedShoppingItem list
+  if (totalsByIngredientId.isEmpty) {
+    return const [];
+  }
+
   final List<AggregatedShoppingItem> flat = [];
   totalsByIngredientId.forEach((id, totalQty) {
     final ingMeta = ingredientById[id];
     if (ingMeta == null) return;
 
-    // Estimated cost: pricePerUnitCents is per 1 (g/ml/pc) of ingredient.unit
-    final estimatedCostCents =
-        ((totalQty * ingMeta.pricePerUnitCents) / 100).round();
+    // FIX: keep cost in CENTS (don’t divide by 100 here)
+    final estimatedCostCents = (totalQty * ingMeta.pricePerUnitCents).round();
 
     int? packs;
-    if (ingMeta.purchasePack.priceCents != null && ingMeta.purchasePack.qty > 0) {
+    if (ingMeta.purchasePack.priceCents != null &&
+        ingMeta.purchasePack.qty > 0) {
       packs = (totalQty / ingMeta.purchasePack.qty).ceil();
     }
 
-    flat.add(AggregatedShoppingItem(
-      ingredient: ingMeta,
-      totalQty: totalQty,
-      unit: ingMeta.unit,
-      estimatedCostCents: estimatedCostCents,
-      packsNeeded: packs,
-    ));
+    flat.add(
+      AggregatedShoppingItem(
+        ingredient: ingMeta,
+        totalQty: totalQty,
+        unit: ingMeta.unit,
+        estimatedCostCents: estimatedCostCents,
+        packsNeeded: packs,
+      ),
+    );
   });
 
-  // Group by aisle, and sort items by name within aisle
+  if (flat.isEmpty) {
+    return const [];
+  }
+
   final Map<ing.Aisle, List<AggregatedShoppingItem>> byAisle = {};
   for (final it in flat) {
     byAisle.putIfAbsent(it.ingredient.aisle, () => []).add(it);
   }
+
   final groups = byAisle.entries.map((e) {
     e.value.sort((a, b) => a.ingredient.name.compareTo(b.ingredient.name));
     return ShoppingAisleGroup(aisle: e.key, items: e.value);
   }).toList();
 
-  // Optional: order aisles in a sensible store flow
   groups.sort((a, b) => _aisleOrder(a.aisle).compareTo(_aisleOrder(b.aisle)));
-
   return groups;
 });
 
@@ -140,3 +163,35 @@ double _toIngredientUnit({
   // This will keep data consistent for your seeded items, which already match.
   return qty;
 }
+
+final shoppingListDebugProvider = FutureProvider<String>((ref) async {
+  final plan = ref.watch(currentPlanProvider).value;
+  final recipes = ref.watch(allRecipesProvider).value;
+  final ingredients = ref.watch(allIngredientsProvider).value;
+
+  if (plan == null) return 'No current plan.';
+  final rc = recipes?.length ?? 0;
+  final ic = ingredients?.length ?? 0;
+
+  int meals = 0, missingRecipe = 0, emptyItems = 0, missingIngredient = 0, ok = 0;
+  final recipeById = {for (final r in (recipes ?? [])) r.id: r};
+  final ingredientById = {for (final i in (ingredients ?? [])) i.id: i};
+
+  for (final day in plan.days) {
+    for (final meal in day.meals) {
+      meals++;
+      final r = recipeById[meal.recipeId];
+      if (r == null) { missingRecipe++; continue; }
+      if (r.items.isEmpty) { emptyItems++; continue; }
+      bool anyMissing = false;
+      for (final it in r.items) {
+        if (!ingredientById.containsKey(it.ingredientId)) { anyMissing = true; missingIngredient++; }
+      }
+      if (!anyMissing) ok++;
+    }
+  }
+
+  return 'Plan ok. Recipes: $rc, Ingredients: $ic, Meals: $meals, '
+         'MissingRecipe: $missingRecipe, EmptyItems: $emptyItems, '
+         'MissingIngredientRefs: $missingIngredient, MealsUsable: $ok';
+});

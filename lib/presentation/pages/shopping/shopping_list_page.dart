@@ -1,16 +1,17 @@
-// lib/presentation/pages/shopping/shopping_list_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart'
+    as ing;
+
 import '../../router/app_router.dart';
 import '../../providers/shopping_list_providers.dart';
-import '../../../domain/entities/ingredient.dart' as ing;
 
-/// Weekly Shopping List built from the current plan’s recipe.items via provider.
-/// Uses `shoppingListItemsProvider` which returns grouped aisle sections with
-/// pre-aggregated quantities and cost hints.
+/// Weekly Shopping List built from the current plan’s recipe.items.
+/// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
+/// by aisle. Includes aisle summary chips, checkboxes, and export to clipboard.
 class ShoppingListPage extends ConsumerStatefulWidget {
   const ShoppingListPage({super.key});
 
@@ -24,7 +25,10 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
 
   @override
   Widget build(BuildContext context) {
+    // IMPORTANT: shoppingListItemsProvider resolves asynchronously via FutureProvider.
     final groupedAsync = ref.watch(shoppingListItemsProvider);
+    final groupedData =
+        groupedAsync.asData?.value ?? const <ShoppingAisleGroup>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -44,36 +48,53 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         actions: [
           IconButton(
             tooltip: 'Export (copy to clipboard)',
-            onPressed: () => _exportCurrent(context, groupedAsync),
+            onPressed: groupedData.isEmpty
+                ? null
+                : () => _exportCurrent(context, groupedData),
             icon: const Icon(Icons.ios_share),
           ),
           IconButton(
             tooltip: 'Clear checked',
-            onPressed:
-                _checked.isEmpty ? null : () => setState(() => _checked.clear()),
+            onPressed: _checked.isEmpty
+                ? null
+                : () => setState(() => _checked.clear()),
             icon: const Icon(Icons.checklist_rtl_outlined),
           ),
         ],
       ),
       body: groupedAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => _ErrorView('Failed to build shopping list: $e'),
-        data: (groups) {
-          if (groups.isEmpty) {
-            return const _EmptyView(
-              title: 'No items yet',
-              message: 'Generate a weekly plan to populate your shopping list.',
+        error: (error, stack) => _EmptyView(
+          title: 'Shopping list unavailable',
+          message: 'Failed to load shopping list data. ${error.toString()}',
+        ),
+        data: (grouped) {
+          if (grouped.isEmpty) {
+            final debug = ref.watch(shoppingListDebugProvider).maybeWhen(
+              data: (s) => s, orElse: () => '',
+            );
+            return _EmptyView(
+              title: 'Nothing to buy',
+              message:
+                  'Your current plan has no measurable items yet, or no plan is selected.\n$debug',
             );
           }
 
-          // Summary chips (aisle → count)
-          final summaries = groups
-              .map((g) => _AisleSummary(aisle: g.aisle, count: g.items.length))
+          final totalItems = grouped.fold<int>(
+            0,
+            (sum, g) => sum + g.items.length,
+          );
+          final summary = grouped
+              .map(
+                (g) => _AisleSummary(
+                  aisleLabel: _aisleDisplayName(g.aisle),
+                  count: g.items.length,
+                ),
+              )
               .toList();
 
           return Column(
             children: [
-              // Summary chips row
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
                 child: Align(
@@ -81,25 +102,24 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                   child: Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: summaries
-                        .map((s) => _AisleChip(
-                              label:
-                                  '${_aisleDisplayName(s.aisle)} · ${s.count}',
-                            ))
+                    children: summary
+                        .map(
+                          (s) =>
+                              _AisleChip(label: '${s.aisleLabel} · ${s.count}'),
+                        )
                         .toList(),
                   ),
                 ),
               ),
-              // Header row
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Row(
                   children: [
                     Text(
-                      'Items (${groups.fold<int>(0, (sum, g) => sum + g.items.length)})',
+                      'Items ($totalItems)',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const Spacer(),
                     const Icon(Icons.store_mall_directory_outlined, size: 18),
@@ -107,33 +127,27 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                     Text(
                       'Grouped by aisle',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
-
-              // Aisle sections
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  itemCount: groups.length,
-                  itemBuilder: (context, index) {
-                    final group = groups[index];
-                    // copy & sort by ingredient name for stable UI
-                    final items = [...group.items]
-                      ..sort((a, b) => a.ingredient.name
-                          .toLowerCase()
-                          .compareTo(b.ingredient.name.toLowerCase()));
+                  itemCount: grouped.length,
+                  itemBuilder: (context, sectionIndex) {
+                    final group = grouped[sectionIndex];
+                    final title = _aisleDisplayName(group.aisle);
+                    final items = group.items;
+
                     return _AisleSection(
-                      title: _aisleDisplayName(group.aisle),
+                      title: title,
                       items: items,
-                      isChecked: _isChecked,
-                      toggleChecked: _toggleChecked,
+                      isChecked: _isCheckedItem,
+                      toggleChecked: _toggleCheckedItem,
                     );
                   },
                 ),
@@ -145,11 +159,12 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
     );
   }
 
-  // ---------- Check state helpers ----------
-  bool _isChecked(AggregatedShoppingItem item) =>
+  // ---------- Check helpers ----------
+
+  bool _isCheckedItem(AggregatedShoppingItem item) =>
       _checked.contains(_itemKey(item));
 
-  void _toggleChecked(AggregatedShoppingItem item) {
+  void _toggleCheckedItem(AggregatedShoppingItem item) {
     final k = _itemKey(item);
     setState(() {
       if (_checked.contains(k)) {
@@ -160,51 +175,48 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
     });
   }
 
-  String _itemKey(AggregatedShoppingItem it) =>
-      '${it.ingredient.id}|${it.unit.name}';
+  String _itemKey(AggregatedShoppingItem i) =>
+      '${i.ingredient.id}|${i.unit.name}';
 
   // ---------- Export ----------
+
   Future<void> _exportCurrent(
     BuildContext ctx,
-    AsyncValue<List<ShoppingAisleGroup>> groupedAsync,
+    List<ShoppingAisleGroup> grouped,
   ) async {
-    final groups = groupedAsync.value;
-    if (groups == null || groups.isEmpty) {
-      ScaffoldMessenger.of(ctx).showSnackBar(
-        const SnackBar(content: Text('Nothing to export yet')),
-      );
+    if (grouped.isEmpty) {
+      ScaffoldMessenger.of(
+        ctx,
+      ).showSnackBar(const SnackBar(content: Text('Shopping list is empty')));
       return;
     }
 
+    final text = _buildExportText(grouped);
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Shopping list copied to clipboard')),
+      );
+    }
+  }
+
+  String _buildExportText(List<ShoppingAisleGroup> grouped) {
     final buf = StringBuffer();
-    for (final g in groups) {
-      buf.writeln('## ${_aisleDisplayName(g.aisle)}');
-      final items = [...g.items]
-        ..sort((a, b) =>
-            a.ingredient.name.toLowerCase().compareTo(b.ingredient.name.toLowerCase()));
-      for (final it in items) {
-        final qty = _formatQty(it.totalQty, it.unit);
-        buf.writeln('- ${it.ingredient.name} — $qty');
+    for (final group in grouped) {
+      buf.writeln('## ${_aisleDisplayName(group.aisle)}');
+      for (final it in group.items) {
+        buf.writeln(
+          '- ${it.ingredient.name} — ${_formatQty(it.totalQty, it.unit)}',
+        );
       }
       buf.writeln();
     }
-
-    await Clipboard.setData(ClipboardData(text: buf.toString().trimRight()));
-    if (!mounted) return;
-    ScaffoldMessenger.of(ctx).showSnackBar(
-      const SnackBar(content: Text('Shopping list copied to clipboard')),
-    );
+    return buf.toString().trimRight();
   }
 }
 
-// ---------- Small models ----------
-class _AisleSummary {
-  const _AisleSummary({required this.aisle, required this.count});
-  final ing.Aisle? aisle;
-  final int count;
-}
-
 // ---------- UI bits ----------
+
 class _AisleChip extends StatelessWidget {
   const _AisleChip({required this.label});
   final String label;
@@ -221,9 +233,9 @@ class _AisleChip extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSecondaryContainer,
-              fontWeight: FontWeight.w600,
-            ),
+          color: Theme.of(context).colorScheme.onSecondaryContainer,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -257,19 +269,18 @@ class _AisleSection extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: Theme.of(context).colorScheme.primary,
-                      letterSpacing: 0.2,
-                    ),
+                  fontWeight: FontWeight.w800,
+                  color: Theme.of(context).colorScheme.primary,
+                  letterSpacing: 0.2,
+                ),
               ),
               const SizedBox(width: 8),
               Text(
                 '• ${items.length} items'
                 '${checkedCount > 0 ? ' • $checkedCount checked' : ''}',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color:
-                          Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -285,14 +296,9 @@ class _AisleSection extends StatelessWidget {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final it = items[i];
-              final checked = isChecked(it);
-
+              final name = it.ingredient.name;
               final qtyStr = _formatQty(it.totalQty, it.unit);
-              final costStr =
-                  it.estimatedCostCents != null ? ' • \$${(it.estimatedCostCents! / 100).toStringAsFixed(2)}' : '';
-              final packHint = it.packsNeeded != null
-                  ? ' • ~${it.packsNeeded} pack(s)'
-                  : '';
+              final checked = isChecked(it);
 
               return ListTile(
                 dense: true,
@@ -301,27 +307,40 @@ class _AisleSection extends StatelessWidget {
                   onChanged: (_) => toggleChecked(it),
                 ),
                 title: Text(
-                  it.ingredient.name,
+                  name,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        decoration:
-                            checked ? TextDecoration.lineThrough : null,
-                        color: checked
-                            ? Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant
-                            : null,
-                      ),
+                    decoration: checked ? TextDecoration.lineThrough : null,
+                    color: checked
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : null,
+                  ),
                 ),
-                trailing: Text(
-                  '$qtyStr$costStr$packHint',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: checked
-                            ? Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant
-                            : Theme.of(context).colorScheme.onSurface,
+                subtitle: it.packsNeeded != null
+                    ? Text(
+                        '${it.packsNeeded} pack(s) suggested',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      )
+                    : null,
+                trailing: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      qtyStr,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
+                    ),
+                    if (it.estimatedCostCents > 0)
+                      Text(
+                        '\$${(it.estimatedCostCents / 100).toStringAsFixed(2)}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ),
                 onTap: () => toggleChecked(it),
               );
@@ -333,46 +352,6 @@ class _AisleSection extends StatelessWidget {
   }
 }
 
-// ---------- Helpers ----------
-String _aisleDisplayName(ing.Aisle? aisle) {
-  if (aisle == null) return 'Other';
-  switch (aisle) {
-    case ing.Aisle.produce:
-      return 'Produce';
-    case ing.Aisle.meat:
-      return 'Meat';
-    case ing.Aisle.dairy:
-      return 'Dairy';
-    case ing.Aisle.pantry:
-      return 'Pantry';
-    case ing.Aisle.frozen:
-      return 'Frozen';
-    case ing.Aisle.condiments:
-      return 'Condiments';
-    case ing.Aisle.bakery:
-      return 'Bakery';
-    case ing.Aisle.household:
-      return 'Household';
-  }
-}
-
-String _formatQty(double qty, ing.Unit unit) {
-  // Compact 1-dec rounding
-  final rounded = (qty * 10).round() / 10.0;
-  final s = (rounded % 1 == 0)
-      ? rounded.toStringAsFixed(0)
-      : rounded.toStringAsFixed(1);
-  switch (unit) {
-    case ing.Unit.grams:
-      return '$s g';
-    case ing.Unit.milliliters:
-      return '$s ml';
-    case ing.Unit.piece:
-      return '$s pc';
-  }
-}
-
-// ---------- Generic views ----------
 class _EmptyView extends StatelessWidget {
   const _EmptyView({required this.title, required this.message});
   final String title;
@@ -394,9 +373,8 @@ class _EmptyView extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color:
-                        Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -405,30 +383,47 @@ class _EmptyView extends StatelessWidget {
   }
 }
 
-class _ErrorView extends StatelessWidget {
-  const _ErrorView(this.message);
-  final String message;
+class _AisleSummary {
+  const _AisleSummary({required this.aisleLabel, required this.count});
+  final String aisleLabel;
+  final int count;
+}
 
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, size: 56, color: Colors.red),
-            const SizedBox(height: 12),
-            Text('Oops', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
-    );
+// ---------- Formatting helpers ----------
+
+String _formatQty(double qty, ing.Unit unit) {
+  // compact 1-dec rounding
+  final rounded = (qty * 10).round() / 10.0;
+  final s = (rounded % 1 == 0)
+      ? rounded.toStringAsFixed(0)
+      : rounded.toStringAsFixed(1);
+  switch (unit) {
+    case ing.Unit.grams:
+      return '$s g';
+    case ing.Unit.milliliters:
+      return '$s ml';
+    case ing.Unit.piece:
+      return '$s pc';
+  }
+}
+
+String _aisleDisplayName(ing.Aisle aisle) {
+  switch (aisle) {
+    case ing.Aisle.produce:
+      return 'Produce';
+    case ing.Aisle.meat:
+      return 'Meat';
+    case ing.Aisle.dairy:
+      return 'Dairy';
+    case ing.Aisle.pantry:
+      return 'Pantry';
+    case ing.Aisle.frozen:
+      return 'Frozen';
+    case ing.Aisle.condiments:
+      return 'Condiments';
+    case ing.Aisle.bakery:
+      return 'Bakery';
+    case ing.Aisle.household:
+      return 'Household';
   }
 }

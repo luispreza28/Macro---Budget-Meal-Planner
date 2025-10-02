@@ -72,6 +72,15 @@ class AppLogger {
     _log(_wtf, message, tag: tag, error: error, stackTrace: stackTrace);
   }
 
+
+  static void info(String message, {String? tag, Object? error, StackTrace? stackTrace}) {
+    i(message, tag: tag, error: error, stackTrace: stackTrace);
+  }
+
+  static void error(String message, {String? tag, Object? error, StackTrace? stackTrace}) {
+    e(message, tag: tag, error: error, stackTrace: stackTrace);
+  }
+
   /// Internal logging method
   static void _log(
     int level,

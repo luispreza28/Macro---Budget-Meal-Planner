@@ -7,11 +7,11 @@ import '../../data/repositories/recipe_repository_impl.dart';
 // Temporarily disabled due to interface mismatches - will be fixed in Stage 6
 // import '../../data/repositories/user_targets_repository_impl.dart';
 // import '../../data/repositories/pantry_repository_impl.dart';
-// import '../../data/repositories/plan_repository_impl.dart';
+import '../../data/repositories/plan_repository_impl.dart';
 // import '../../data/repositories/price_override_repository_impl.dart';
+import '../../data/services/data_integrity_service.dart';
 import '../../data/services/seed_data_service.dart';
 import '../../data/services/plan_generation_service.dart';
-import '../../data/repositories/mock_plan_repository.dart';
 import '../../domain/repositories/ingredient_repository.dart';
 import '../../domain/repositories/recipe_repository.dart';
 import '../../domain/repositories/user_targets_repository.dart';
@@ -19,7 +19,6 @@ import '../../domain/repositories/pantry_repository.dart';
 import '../../domain/repositories/plan_repository.dart';
 import '../../domain/repositories/price_override_repository.dart';
 import '../../data/repositories/user_targets_local_repository.dart';
-
 
 /// Provider for the app database instance
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -52,23 +51,23 @@ final userTargetsRepositoryProvider = Provider<UserTargetsRepository>((ref) {
 /// Provider for pantry repository - Temporarily disabled due to interface mismatch
 final pantryRepositoryProvider = Provider<PantryRepository>((ref) {
   throw UnimplementedError(
-      'PantryRepository implementation temporarily disabled - interface mismatch');
+    'PantryRepository implementation temporarily disabled - interface mismatch',
+  );
 });
 
-/// Provider for plan repository - now backed by an in-memory mock
+/// Provider for plan repository backed by Drift storage
 final planRepositoryProvider = Provider<PlanRepository>((ref) {
-  final repo = MockPlanRepository();
-  ref.onDispose(() {
-    // Close stream controllers when provider is disposed (typically never in app lifetime)
-    repo.dispose();
-  });
-  return repo;
+  final database = ref.watch(databaseProvider);
+  return PlanRepositoryImpl(database);
 });
 
 /// Provider for price override repository - Temporarily disabled due to interface mismatch
-final priceOverrideRepositoryProvider = Provider<PriceOverrideRepository>((ref) {
+final priceOverrideRepositoryProvider = Provider<PriceOverrideRepository>((
+  ref,
+) {
   throw UnimplementedError(
-      'PriceOverrideRepository implementation temporarily disabled - interface mismatch');
+    'PriceOverrideRepository implementation temporarily disabled - interface mismatch',
+  );
 });
 
 /// Provider for seed data service - Temporarily disabled
@@ -78,7 +77,24 @@ final seedDataServiceProvider = Provider<SeedDataService>((ref) {
 
 /// Provider for a very simple plan generation service
 final planGenerationServiceProvider = Provider<PlanGenerationService>((ref) {
-  return PlanGenerationService();
+  final planRepository = ref.watch(planRepositoryProvider);
+  return PlanGenerationService(planRepository);
+});
+
+final dataIntegrityServiceProvider = Provider<DataIntegrityService>((ref) {
+  final ingredientRepo = ref.watch(ingredientRepositoryProvider);
+  final recipeRepo = ref.watch(recipeRepositoryProvider);
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return DataIntegrityService(
+    ingredientRepository: ingredientRepo,
+    recipeRepository: recipeRepo,
+    prefs: prefs,
+  );
+});
+
+final dataIntegrityInitializationProvider = FutureProvider<void>((ref) async {
+  final svc = ref.watch(dataIntegrityServiceProvider);
+  await svc.healMissingIngredientsOnce();
 });
 
 /// Provider to initialize seed data on app startup

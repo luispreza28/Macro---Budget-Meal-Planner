@@ -17,6 +17,9 @@ abstract class PlanRepository {
   /// Get plans by user targets ID
   Future<List<Plan>> getPlansByUserTargetsId(String userTargetsId);
 
+  /// Insert a new plan (persists immediately).
+  Future<void> addPlan(Plan plan);
+
   /// Save new plan
   Future<void> savePlan(Plan plan);
 
@@ -75,6 +78,9 @@ abstract class PlanRepository {
 
   /// Watch current plan (reactive stream)
   Stream<Plan?> watchCurrentPlan();
+
+  /// Watch the most recently created plan (reactive stream).
+  Stream<Plan?> watchLatestPlan();
 
   /// Watch recent plans (reactive stream)
   Stream<List<Plan>> watchRecentPlans({int limit = 10});

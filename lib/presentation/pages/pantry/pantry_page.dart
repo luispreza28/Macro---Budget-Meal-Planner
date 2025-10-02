@@ -141,9 +141,6 @@ class _PantryPageState extends ConsumerState<PantryPage> {
 
   Widget _buildPantryContent(BuildContext context) {
     final filteredItems = _getFilteredPantryItems();
-    final totalItems = _mockPantryItems.length;
-    final expiringItems = _getExpiringItemsCount();
-    final totalValue = _calculateTotalValue();
 
     return Column(
       children: [
