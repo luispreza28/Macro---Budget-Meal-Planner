@@ -8,8 +8,11 @@ import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart'
 
 import '../../router/app_router.dart';
 import '../../providers/shopping_list_providers.dart';
+import '../../providers/database_providers.dart';
+import '../../../data/services/local_storage_service.dart';
+import '../../providers/plan_providers.dart';
 
-/// Weekly Shopping List built from the current plan’s recipe.items.
+/// Weekly Shopping List built from the current planâ€™s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
 /// by aisle. Includes aisle summary chips, checkboxes, and export to clipboard.
 class ShoppingListPage extends ConsumerStatefulWidget {
@@ -21,10 +24,47 @@ class ShoppingListPage extends ConsumerStatefulWidget {
 
 class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
   /// Track checked items by a stable key: "<ingredientId>|<unit>"
-  final Set<String> _checked = <String>{};
+  Set<String> _checked = <String>{};
+
+  LocalStorageService? _storage;
+  String? _persistKey; // e.g., shopping_checked_<planId>
+  bool _loadedForPlan = false;
+
+  @override
+  void dispose() {
+    _saveChecked();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final currentPlanAsync = ref.watch(currentPlanProvider);
+
+    currentPlanAsync.whenData((plan) {
+      final planId = plan?.id;
+      if (planId == null) {
+        return;
+      }
+
+      final key = 'shopping_checked_$planId';
+      if (_persistKey == key && _loadedForPlan) {
+        return;
+      }
+
+      _persistKey = key;
+      _storage ??= LocalStorageService(ref.read(sharedPreferencesProvider));
+      final saved = _storage!.getStringList(key);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _checked = saved?.toSet() ?? <String>{};
+        _loadedForPlan = true;
+      });
+    });
+
     // IMPORTANT: shoppingListItemsProvider resolves asynchronously via FutureProvider.
     final groupedAsync = ref.watch(shoppingListItemsProvider);
     final groupedData =
@@ -57,7 +97,10 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
             tooltip: 'Clear checked',
             onPressed: _checked.isEmpty
                 ? null
-                : () => setState(() => _checked.clear()),
+                : () {
+                    setState(() => _checked.clear());
+                    _saveChecked();
+                  },
             icon: const Icon(Icons.checklist_rtl_outlined),
           ),
         ],
@@ -70,9 +113,9 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         ),
         data: (grouped) {
           if (grouped.isEmpty) {
-            final debug = ref.watch(shoppingListDebugProvider).maybeWhen(
-              data: (s) => s, orElse: () => '',
-            );
+            final debug = ref
+                .watch(shoppingListDebugProvider)
+                .maybeWhen(data: (s) => s, orElse: () => '');
             return _EmptyView(
               title: 'Nothing to buy',
               message:
@@ -104,8 +147,9 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                     runSpacing: 6,
                     children: summary
                         .map(
-                          (s) =>
-                              _AisleChip(label: '${s.aisleLabel} · ${s.count}'),
+                          (s) => _AisleChip(
+                            label: '${s.aisleLabel} Â· ${s.count}',
+                          ),
                         )
                         .toList(),
                   ),
@@ -159,6 +203,12 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
     );
   }
 
+  void _saveChecked() {
+    if (_persistKey == null) return;
+    _storage ??= LocalStorageService(ref.read(sharedPreferencesProvider));
+    _storage!.setStringList(_persistKey!, _checked.toList());
+  }
+
   // ---------- Check helpers ----------
 
   bool _isCheckedItem(AggregatedShoppingItem item) =>
@@ -173,6 +223,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         _checked.add(k);
       }
     });
+    _saveChecked();
   }
 
   String _itemKey(AggregatedShoppingItem i) =>
@@ -206,7 +257,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
       buf.writeln('## ${_aisleDisplayName(group.aisle)}');
       for (final it in group.items) {
         buf.writeln(
-          '- ${it.ingredient.name} — ${_formatQty(it.totalQty, it.unit)}',
+          '- ${it.ingredient.name} â€” ${_formatQty(it.totalQty, it.unit)}',
         );
       }
       buf.writeln();
@@ -260,7 +311,6 @@ class _AisleSection extends StatelessWidget {
 
     return Column(
       children: [
-        // Section header with mini-summary
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
@@ -392,7 +442,6 @@ class _AisleSummary {
 // ---------- Formatting helpers ----------
 
 String _formatQty(double qty, ing.Unit unit) {
-  // compact 1-dec rounding
   final rounded = (qty * 10).round() / 10.0;
   final s = (rounded % 1 == 0)
       ? rounded.toStringAsFixed(0)
