@@ -1,31 +1,99 @@
 // lib/data/services/plan_generation_service.dart
 import 'dart:math';
 
+import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
-import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/user_targets.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
 /// Falls back to Recipe.macrosPerServ and costPerServCents if items are missing.
 class PlanGenerationService {
-  Plan generate({
+  PlanGenerationService({Random? rng}) : _rng = rng ?? Random();
+
+  final Random _rng;
+
+  /// Generates a weekly plan from inputs.
+  /// NOTE: This method is pure and **does not persist** the plan. Callers are
+  /// responsible for saving and setting the current plan.
+  Future<Plan> generate({
     required UserTargets targets,
     required List<Recipe> recipes,
     required List<Ingredient> ingredients,
-  }) {
+  }) async {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
     }
 
     final ingById = {for (final i in ingredients) i.id: i};
 
-    final mealsPerDay = targets.mealsPerDay.clamp(2, 5);
-    final rng = Random();
-    final pool = [...recipes]..shuffle(rng);
+    final int mealsPerDay = targets.mealsPerDay.clamp(1, 6) as int;
+    final rng = _rng;
+    final all = [...recipes];
+    final itemized = all.where((r) => r.items.isNotEmpty).toList();
+    final nonItemized = all.where((r) => r.items.isEmpty).toList();
+
+    final int mealsNeeded = 7 * mealsPerDay;
+    final int desiredPoolSize =
+        (mealsNeeded * 2).clamp(mealsNeeded, 200) as int;
+
+    const double itemizedWeight = 0.75;
+    int targetItemized = (desiredPoolSize * itemizedWeight).round();
+    int targetNonItemized = desiredPoolSize - targetItemized;
+
+    final int availableItemized = itemized.length;
+    final int availableNonItemized = nonItemized.length;
+
+    if (availableItemized < targetItemized) {
+      final int deficit = targetItemized - availableItemized;
+      targetItemized = availableItemized;
+      final int borrowed = targetNonItemized + deficit;
+      targetNonItemized = borrowed > availableNonItemized
+          ? availableNonItemized
+          : borrowed;
+    }
+
+    if (availableNonItemized < targetNonItemized) {
+      final int deficit = targetNonItemized - availableNonItemized;
+      targetNonItemized = availableNonItemized;
+      final int borrowed = targetItemized + deficit;
+      targetItemized = borrowed > availableItemized
+          ? availableItemized
+          : borrowed;
+    }
+
+    if (availableItemized == 0 && availableNonItemized == 0) {
+      throw StateError('No recipes available to build a plan.');
+    }
+
+    List<T> _sample<T>(List<T> list, int n) {
+      if (list.isEmpty || n <= 0) return <T>[];
+      final copy = [...list]..shuffle(rng);
+      final int takeCount = n < 0 ? 0 : (n > list.length ? list.length : n);
+      return copy.take(takeCount).toList();
+    }
+
+    final sampledItemized = _sample(itemized, targetItemized);
+    final sampledNonItemized = _sample(nonItemized, targetNonItemized);
+
+    final pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
+      ..shuffle(rng);
+
+    while (pool.length < mealsNeeded) {
+      if (itemized.isNotEmpty) {
+        pool.add(itemized[rng.nextInt(itemized.length)]);
+      } else if (nonItemized.isNotEmpty) {
+        pool.add(nonItemized[rng.nextInt(nonItemized.length)]);
+      } else {
+        break;
+      }
+    }
+
+    if (pool.isEmpty) {
+      throw StateError('Unable to build a recipe pool for planning.');
+    }
 
     final List<PlanDay> days = [];
-    int mealCursor = 0;
 
     double totalKcal = 0;
     double totalProtein = 0;
@@ -33,13 +101,36 @@ class PlanGenerationService {
     double totalFat = 0;
     int totalCostCents = 0;
 
+    Recipe? lastPicked;
+    int poolCursor = 0;
+
+    Recipe _pickWithNoImmediateRepeat(Set<String> usedThisDay) {
+      for (int attempt = 0; attempt < pool.length; attempt++) {
+        final int index = (poolCursor + attempt) % pool.length;
+        final candidate = pool[index];
+        final bool repeatsLast = candidate.id == lastPicked?.id;
+        final bool usedInDay = usedThisDay.contains(candidate.id);
+        if (!repeatsLast && !usedInDay) {
+          poolCursor = (index + 1) % pool.length;
+          return candidate;
+        }
+      }
+
+      final fallback = pool[poolCursor % pool.length];
+      poolCursor = (poolCursor + 1) % pool.length;
+      return fallback;
+    }
+
     for (int d = 0; d < 7; d++) {
       final List<PlanMeal> meals = [];
-      for (int m = 0; m < mealsPerDay; m++) {
-        final recipe = pool[mealCursor % pool.length];
-        mealCursor++;
+      final usedThisDay = <String>{};
 
-        final servings = 1.0;
+      for (int m = 0; m < mealsPerDay; m++) {
+        final recipe = _pickWithNoImmediateRepeat(usedThisDay);
+        usedThisDay.add(recipe.id);
+        lastPicked = recipe;
+
+        const servings = 1.0;
 
         final _Totals t = _computeFromRecipe(
           recipe: recipe,
@@ -53,17 +144,11 @@ class PlanGenerationService {
         totalFat += t.fatG;
         totalCostCents += t.costCents;
 
-        meals.add(PlanMeal(
-          recipeId: recipe.id,
-          servings: servings,
-        ));
+        meals.add(PlanMeal(recipeId: recipe.id, servings: servings));
       }
 
       final date = DateTime.now().add(Duration(days: d));
-      days.add(PlanDay(
-        date: date.toIso8601String(),
-        meals: meals,
-      ));
+      days.add(PlanDay(date: date.toIso8601String(), meals: meals));
     }
 
     final planTotals = PlanTotals(
@@ -74,9 +159,7 @@ class PlanGenerationService {
       costCents: totalCostCents,
     );
 
-    // Remove `updatedAt:` — the Plan constructor in your domain model
-    // does not accept it.
-    return Plan(
+    final plan = Plan(
       id: 'plan_${DateTime.now().millisecondsSinceEpoch}',
       name: 'Weekly Plan',
       userTargetsId: targets.id,
@@ -84,6 +167,8 @@ class PlanGenerationService {
       totals: planTotals,
       createdAt: DateTime.now(),
     );
+
+    return plan;
   }
 
   _Totals _computeFromRecipe({
@@ -92,7 +177,10 @@ class PlanGenerationService {
     required Map<String, Ingredient> ingById,
   }) {
     if (recipe.items.isNotEmpty) {
-      double kcal = 0, protein = 0, carbs = 0, fat = 0;
+      double kcal = 0;
+      double protein = 0;
+      double carbs = 0;
+      double fat = 0;
       double costCentsDouble = 0;
 
       for (final it in recipe.items) {
@@ -108,7 +196,7 @@ class PlanGenerationService {
             baseQtyFor100 = qty / 100.0;
             break;
           case Unit.piece:
-            baseQtyFor100 = qty; // assume 1 pc ~ 100g unless you add per-piece data
+            baseQtyFor100 = qty;
             break;
         }
 

@@ -14,7 +14,6 @@ import '../../providers/database_providers.dart';
 
 // NEW: watch ingredients so we can pass them into WeeklyPlanGrid
 import '../../providers/ingredient_providers.dart';
-import '../../../domain/entities/ingredient.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -117,11 +116,14 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 data: (recipes) {
                   // Wait for ingredients too
                   return ingredientsAsync.when(
-                    loading: () => const Center(child: CircularProgressIndicator()),
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
                     error: (error, stack) => _buildErrorState(error.toString()),
                     data: (ingredients) {
                       final recipeMap = {for (var r in recipes) r.id: r};
-                      final ingredientMap = {for (var i in ingredients) i.id: i};
+                      final ingredientMap = {
+                        for (var i in ingredients) i.id: i,
+                      };
 
                       return Stack(
                         children: [
@@ -130,11 +132,13 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                               // Totals bar
                               TotalsBar(
                                 targets: targets,
-                                actualKcal: plan.totals.kcal / 7, // Daily average
+                                actualKcal:
+                                    plan.totals.kcal / 7, // Daily average
                                 actualProteinG: plan.totals.proteinG / 7,
                                 actualCarbsG: plan.totals.carbsG / 7,
                                 actualFatG: plan.totals.fatG / 7,
-                                actualCostCents: (plan.totals.costCents / 7).round(),
+                                actualCostCents: (plan.totals.costCents / 7)
+                                    .round(),
                                 showBudget: targets.budgetCents != null,
                               ),
 
@@ -143,10 +147,16 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 child: WeeklyPlanGrid(
                                   plan: plan,
                                   recipes: recipeMap,
-                                  ingredients: ingredientMap, // <— NEW required param
+                                  ingredients:
+                                      ingredientMap, // <— NEW required param
                                   selectedMealIndex: selectedMealIndex,
                                   onMealTap: (dayIndex, mealIndex) {
-                                    _handleMealTap(dayIndex, mealIndex, plan, recipeMap);
+                                    _handleMealTap(
+                                      dayIndex,
+                                      mealIndex,
+                                      plan,
+                                      recipeMap,
+                                    );
                                   },
                                 ),
                               ),
@@ -163,7 +173,8 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                   child: Align(
                                     alignment: Alignment.bottomCenter,
                                     child: GestureDetector(
-                                      onTap: () {}, // Prevent closing when tapping drawer
+                                      onTap:
+                                          () {}, // Prevent closing when tapping drawer
                                       child: _buildSwapDrawer(plan, recipeMap),
                                     ),
                                   ),
@@ -190,14 +201,17 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         children: [
           const Icon(Icons.error_outline, size: 64, color: Colors.red),
           const SizedBox(height: 16),
-          Text('Error loading plan', style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            'Error loading plan',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 8),
           Text(
             error,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 16),
           FilledButton(
@@ -219,9 +233,15 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         children: [
           const Icon(Icons.settings, size: 64, color: Colors.grey),
           const SizedBox(height: 16),
-          Text('Setup Required', style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            'Setup Required',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 8),
-          const Text('Please complete your setup to generate meal plans.', textAlign: TextAlign.center),
+          const Text(
+            'Please complete your setup to generate meal plans.',
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () => context.go(AppRouter.onboarding),
@@ -239,9 +259,15 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         children: [
           const Icon(Icons.restaurant_menu, size: 64, color: Colors.grey),
           const SizedBox(height: 16),
-          Text('No Meal Plan', style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            'No Meal Plan',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 8),
-          const Text('Generate your first meal plan to get started.', textAlign: TextAlign.center),
+          const Text(
+            'Generate your first meal plan to get started.',
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 16),
           FilledButton(
             onPressed: () async {
@@ -293,7 +319,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  void _handleMealTap(int dayIndex, int mealIndex, plan, Map<String, Recipe> recipeMap) {
+  void _handleMealTap(
+    int dayIndex,
+    int mealIndex,
+    plan,
+    Map<String, Recipe> recipeMap,
+  ) {
     final globalMealIndex = dayIndex * plan.days[0].meals.length + mealIndex;
 
     setState(() {
@@ -319,10 +350,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Swapped to ${newRecipe.name}'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () {},
-        ),
+        action: SnackBarAction(label: 'Undo', onPressed: () {}),
       ),
     );
   }
@@ -344,7 +372,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       }
 
       final generator = ref.read(planGenerationServiceProvider);
-      final plan = generator.generate(
+      final plan = await generator.generate(
         targets: targets,
         recipes: recipes,
         ingredients: ingredients,
@@ -355,14 +383,14 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       await notifier.setCurrentPlan(plan.id);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Weekly plan generated')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Weekly plan generated')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to generate plan: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
     }
   }
 
@@ -371,7 +399,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Export Plan'),
-        content: const Text('Export functionality will be implemented in Stage 5.'),
+        content: const Text(
+          'Export functionality will be implemented in Stage 5.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
@@ -382,26 +412,31 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  List<SwapOption> _generateMockSwapOptions(Recipe currentRecipe, Map<String, Recipe> recipeMap) {
+  List<SwapOption> _generateMockSwapOptions(
+    Recipe currentRecipe,
+    Map<String, Recipe> recipeMap,
+  ) {
     final alternatives = recipeMap.values
         .where((r) => r.id != currentRecipe.id)
         .take(3)
-        .map((r) => SwapOption(
-              recipe: r,
-              reasons: const [
-                SwapReason(
-                  type: SwapReasonType.cheaper,
-                  description: 'Save \$2.50/week',
-                ),
-                SwapReason(
-                  type: SwapReasonType.higherProtein,
-                  description: '+15g protein',
-                ),
-              ],
-              costDeltaCents: -250,
-              proteinDeltaG: 15,
-              kcalDelta: -50,
-            ))
+        .map(
+          (r) => SwapOption(
+            recipe: r,
+            reasons: const [
+              SwapReason(
+                type: SwapReasonType.cheaper,
+                description: 'Save \$2.50/week',
+              ),
+              SwapReason(
+                type: SwapReasonType.higherProtein,
+                description: '+15g protein',
+              ),
+            ],
+            costDeltaCents: -250,
+            proteinDeltaG: 15,
+            kcalDelta: -50,
+          ),
+        )
         .toList();
 
     return alternatives;

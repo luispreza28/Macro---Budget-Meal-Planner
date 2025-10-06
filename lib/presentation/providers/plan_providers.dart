@@ -10,7 +10,7 @@ final allPlansProvider = StreamProvider<List<Plan>>((ref) {
   return repository.watchAllPlans();
 });
 
-/// Provider for current active plan
+/// Provider for current active plan (explicitly user-selected)
 final currentPlanProvider = StreamProvider<Plan?>((ref) {
   final repository = ref.watch(planRepositoryProvider);
   return repository.watchCurrentPlan();
@@ -23,15 +23,16 @@ final recentPlansProvider = StreamProvider<List<Plan>>((ref) {
 });
 
 /// Provider for plan by ID
-final planByIdProvider = 
-    FutureProvider.family<Plan?, String>((ref, id) {
+final planByIdProvider = FutureProvider.family<Plan?, String>((ref, id) {
   final repository = ref.watch(planRepositoryProvider);
   return repository.getPlanById(id);
 });
 
 /// Provider for plans by user targets ID
-final plansByUserTargetsIdProvider = 
-    FutureProvider.family<List<Plan>, String>((ref, userTargetsId) {
+final plansByUserTargetsIdProvider = FutureProvider.family<List<Plan>, String>((
+  ref,
+  userTargetsId,
+) {
   final repository = ref.watch(planRepositoryProvider);
   return repository.getPlansByUserTargetsId(userTargetsId);
 });
@@ -55,18 +56,19 @@ final planStatisticsProvider = FutureProvider<Map<String, dynamic>>((ref) {
 });
 
 /// Provider for best scoring plans
-final bestScoringPlansProvider = FutureProvider.family<List<Plan>, BestPlansParams>((ref, params) {
-  final repository = ref.watch(planRepositoryProvider);
-  return repository.getBestScoringPlans(
-    targetKcal: params.targetKcal,
-    targetProteinG: params.targetProteinG,
-    targetCarbsG: params.targetCarbsG,
-    targetFatG: params.targetFatG,
-    budgetCents: params.budgetCents,
-    weights: params.weights,
-    limit: params.limit,
-  );
-});
+final bestScoringPlansProvider =
+    FutureProvider.family<List<Plan>, BestPlansParams>((ref, params) {
+      final repository = ref.watch(planRepositoryProvider);
+      return repository.getBestScoringPlans(
+        targetKcal: params.targetKcal,
+        targetProteinG: params.targetProteinG,
+        targetCarbsG: params.targetCarbsG,
+        targetFatG: params.targetFatG,
+        budgetCents: params.budgetCents,
+        weights: params.weights,
+        limit: params.limit,
+      );
+    });
 
 /// Parameters for best scoring plans provider
 class BestPlansParams {
@@ -97,7 +99,7 @@ class PlanNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<void> savePlan(Plan plan) async {
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() => _repository.savePlan(plan));
+    state = await AsyncValue.guard(() => _repository.addPlan(plan));
   }
 
   Future<void> updatePlan(Plan plan) async {
@@ -122,13 +124,15 @@ class PlanNotifier extends StateNotifier<AsyncValue<void>> {
 
   Future<void> cleanupOldPlans({int keepCount = 50}) async {
     state = const AsyncValue.loading();
-    state = await AsyncValue.guard(() => _repository.cleanupOldPlans(keepCount: keepCount));
+    state = await AsyncValue.guard(
+      () => _repository.cleanupOldPlans(keepCount: keepCount),
+    );
   }
 }
 
 /// Provider for plan operations
-final planNotifierProvider = 
+final planNotifierProvider =
     StateNotifierProvider<PlanNotifier, AsyncValue<void>>((ref) {
-  final repository = ref.watch(planRepositoryProvider);
-  return PlanNotifier(repository);
-});
+      final repository = ref.watch(planRepositoryProvider);
+      return PlanNotifier(repository);
+    });

@@ -13,7 +13,7 @@ class DatabaseMigrationService {
   MigrationStrategy get migrationStrategy => MigrationStrategy(
     onCreate: _onCreate,
     onUpgrade: _onUpgrade,
-    beforeOpen: (details) async => await _beforeOpen(details.executor),
+    beforeOpen: (details) async => await _beforeOpen(),
   );
 
   /// Create all tables on first run
@@ -37,11 +37,11 @@ class DatabaseMigrationService {
   }
 
   /// Called before opening the database
-  Future<void> _beforeOpen(QueryExecutor e) async {
+  Future<void> _beforeOpen() async {
     AppLogger.d('Configuring database before opening', tag: 'DatabaseMigration');
     
     // Enable foreign key constraints
-    await e.runCustom('PRAGMA foreign_keys = ON');
+    await _database.customStatement('PRAGMA foreign_keys = ON');
     
     // Apply performance optimizations
     final performanceService = DatabasePerformanceService(_database);

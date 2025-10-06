@@ -90,23 +90,25 @@ class MockPlanRepository implements PlanRepository {
     int limit = 10,
   }) async {
     final scored = _plans
-        .map((p) => MapEntry(
-              p,
-              p.calculateScore(
-                targetKcal: targetKcal,
-                targetProteinG: targetProteinG,
-                targetCarbsG: targetCarbsG,
-                targetFatG: targetFatG,
-                budgetCents: budgetCents,
-                weights: {
-                  'macro_error': weights['macro_error'] ?? 1.0,
-                  'protein_penalty_multiplier':
-                      weights['protein_penalty_multiplier'] ?? 2.0,
-                  'budget_error': weights['budget_error'] ?? 1.0,
-                  'variety_penalty': weights['variety_penalty'] ?? 0.3,
-                },
-              ),
-            ))
+        .map(
+          (p) => MapEntry(
+            p,
+            p.calculateScore(
+              targetKcal: targetKcal,
+              targetProteinG: targetProteinG,
+              targetCarbsG: targetCarbsG,
+              targetFatG: targetFatG,
+              budgetCents: budgetCents,
+              weights: {
+                'macro_error': weights['macro_error'] ?? 1.0,
+                'protein_penalty_multiplier':
+                    weights['protein_penalty_multiplier'] ?? 2.0,
+                'budget_error': weights['budget_error'] ?? 1.0,
+                'variety_penalty': weights['variety_penalty'] ?? 0.3,
+              },
+            ),
+          ),
+        )
         .toList();
 
     scored.sort((a, b) => a.value.compareTo(b.value));
@@ -143,7 +145,10 @@ class MockPlanRepository implements PlanRepository {
     required DateTime endDate,
   }) async {
     return _plans
-        .where((p) => p.createdAt.isAfter(startDate) && p.createdAt.isBefore(endDate))
+        .where(
+          (p) =>
+              p.createdAt.isAfter(startDate) && p.createdAt.isBefore(endDate),
+        )
         .toList();
   }
 
@@ -159,6 +164,9 @@ class MockPlanRepository implements PlanRepository {
 
   @override
   Future<bool> planExists(String id) async => _findById(id) != null;
+
+  @override
+  Future<void> addPlan(Plan plan) async => savePlan(plan);
 
   @override
   Future<void> savePlan(Plan plan) async {
@@ -191,32 +199,44 @@ class MockPlanRepository implements PlanRepository {
     final total = _plans.length;
     final avgCost = total == 0
         ? 0.0
-        : _plans.map((p) => p.totals.costCents).reduce((a, b) => a + b) / total / 100.0;
+        : _plans.map((p) => p.totals.costCents).reduce((a, b) => a + b) /
+              total /
+              100.0;
 
-    return {
-      'count': total,
-      'avg_weekly_cost': avgCost,
-    };
+    return {'count': total, 'avg_weekly_cost': avgCost};
   }
 
   // -------- FIX: yield initial snapshot before controller stream --------
   @override
   Stream<List<Plan>> watchAllPlans() async* {
-    yield List.unmodifiable(_plans);     // immediate snapshot
-    yield* _plansCtrl.stream;            // then live updates
+    yield List.unmodifiable(_plans); // immediate snapshot
+    yield* _plansCtrl.stream; // then live updates
   }
 
   @override
   Stream<Plan?> watchCurrentPlan() async* {
-    yield _currentPlan();                // immediate snapshot (possibly null)
-    yield* _currentPlanCtrl.stream;      // then live updates
+    yield _currentPlan(); // immediate snapshot (possibly null)
+    yield* _currentPlanCtrl.stream; // then live updates
+  }
+
+  @override
+  Stream<Plan?> watchLatestPlan() async* {
+    Plan? selectLatest(List<Plan> snapshot) {
+      if (snapshot.isEmpty) return null;
+      return snapshot.reduce(
+        (a, b) => a.createdAt.isAfter(b.createdAt) ? a : b,
+      );
+    }
+
+    yield selectLatest(_plans);
+    yield* _plansCtrl.stream.map(selectLatest);
   }
 
   @override
   Stream<List<Plan>> watchRecentPlans({int limit = 10}) async* {
     final copy = [..._plans];
     copy.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    yield copy.take(limit).toList();     // immediate snapshot
+    yield copy.take(limit).toList(); // immediate snapshot
     yield* _plansCtrl.stream.map((plans) {
       final c = [...plans];
       c.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -226,7 +246,7 @@ class MockPlanRepository implements PlanRepository {
 
   @override
   Stream<int> watchPlansCount() async* {
-    yield _plans.length;                 // immediate snapshot
-    yield* _plansCountCtrl.stream;       // then live updates
+    yield _plans.length; // immediate snapshot
+    yield* _plansCountCtrl.stream; // then live updates
   }
 }
