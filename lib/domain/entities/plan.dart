@@ -22,6 +22,18 @@ class PlanMeal extends Equatable {
   /// Optional notes for the meal
   final String? notes;
 
+  PlanMeal copyWith({
+    String? recipeId,
+    double? servings,
+    String? notes,
+  }) {
+    return PlanMeal(
+      recipeId: recipeId ?? this.recipeId,
+      servings: servings ?? this.servings,
+      notes: notes ?? this.notes,
+    );
+  }
+
   factory PlanMeal.fromJson(Map<String, dynamic> json) =>
       _$PlanMealFromJson(json);
 
@@ -44,6 +56,16 @@ class PlanDay extends Equatable {
 
   /// List of meals for this day
   final List<PlanMeal> meals;
+
+  PlanDay copyWith({
+    String? date,
+    List<PlanMeal>? meals,
+  }) {
+    return PlanDay(
+      date: date ?? this.date,
+      meals: meals ?? this.meals,
+    );
+  }
 
   factory PlanDay.fromJson(Map<String, dynamic> json) =>
       _$PlanDayFromJson(json);

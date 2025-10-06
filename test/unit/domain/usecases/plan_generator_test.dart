@@ -6,6 +6,8 @@ import 'package:macro_budget_meal_planner/domain/usecases/macro_calculator.dart'
 import 'package:macro_budget_meal_planner/domain/usecases/plan_generator.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('PlanGenerator', () {
     late PlanGenerator planGenerator;
     late MacroCalculator macroCalculator;

@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Ingredient Entity Tests', () {
     late Ingredient testIngredient;
 

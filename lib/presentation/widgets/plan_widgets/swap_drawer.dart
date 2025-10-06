@@ -9,15 +9,77 @@ class SwapDrawer extends StatelessWidget {
     required this.alternatives,
     required this.onSwapSelected,
     required this.onClose,
+    this.errorMessage,
+    this.isLoading = false,
   });
+
+  const SwapDrawer.loading({
+    super.key,
+    required this.currentRecipe,
+    required this.onClose,
+  }) : alternatives = const [],
+       onSwapSelected = _noRecipe,
+       errorMessage = null,
+       isLoading = true;
+
+  const SwapDrawer.error({
+    super.key,
+    required this.currentRecipe,
+    required this.onClose,
+    String message = 'Error',
+  }) : alternatives = const [],
+       onSwapSelected = _noRecipe,
+       errorMessage = message,
+       isLoading = false;
 
   final Recipe currentRecipe;
   final List<SwapOption> alternatives;
-  final Function(Recipe newRecipe) onSwapSelected;
+  final void Function(Recipe newRecipe) onSwapSelected;
   final VoidCallback onClose;
+  final String? errorMessage;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
+    Widget content;
+    if (isLoading) {
+      content = const Center(child: CircularProgressIndicator());
+    } else if (errorMessage != null) {
+      content = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 36, color: Colors.redAccent),
+            const SizedBox(height: 8),
+            Text(
+              errorMessage!,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    } else if (alternatives.isEmpty) {
+      content = const Center(child: Text('No alternatives available'));
+    } else {
+      content = ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: alternatives.length,
+        itemBuilder: (context, index) {
+          final option = alternatives[index];
+          return _SwapOptionCard(
+            option: option,
+            onTap: () {
+              onSwapSelected(option.recipe);
+              onClose();
+            },
+          );
+        },
+      );
+    }
+
     return Container(
       height: MediaQuery.of(context).size.height * 0.6,
       decoration: BoxDecoration(
@@ -32,11 +94,13 @@ class SwapDrawer extends StatelessWidget {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.4),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withOpacity(0.4),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          
+
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
@@ -48,9 +112,8 @@ class SwapDrawer extends StatelessWidget {
                     children: [
                       Text(
                         'Swap Meal',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -62,35 +125,13 @@ class SwapDrawer extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(
-                  onPressed: onClose,
-                  icon: const Icon(Icons.close),
-                ),
+                IconButton(onPressed: onClose, icon: const Icon(Icons.close)),
               ],
             ),
           ),
-          
+
           // Alternatives list
-          Expanded(
-            child: alternatives.isEmpty
-                ? const Center(
-                    child: Text('No alternatives available'),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: alternatives.length,
-                    itemBuilder: (context, index) {
-                      final option = alternatives[index];
-                      return _SwapOptionCard(
-                        option: option,
-                        onTap: () {
-                          onSwapSelected(option.recipe);
-                          onClose();
-                        },
-                      );
-                    },
-                  ),
-          ),
+          Expanded(child: content),
         ],
       ),
     );
@@ -98,10 +139,7 @@ class SwapDrawer extends StatelessWidget {
 }
 
 class _SwapOptionCard extends StatelessWidget {
-  const _SwapOptionCard({
-    required this.option,
-    required this.onTap,
-  });
+  const _SwapOptionCard({required this.option, required this.onTap});
 
   final SwapOption option;
   final VoidCallback onTap;
@@ -137,9 +175,9 @@ class _SwapOptionCard extends StatelessWidget {
                   ),
                 ],
               ),
-              
+
               const SizedBox(height: 8),
-              
+
               // Reason badges
               Wrap(
                 spacing: 6,
@@ -148,15 +186,15 @@ class _SwapOptionCard extends StatelessWidget {
                   return _ReasonBadge(reason: reason);
                 }).toList(),
               ),
-              
+
               const SizedBox(height: 12),
-              
+
               // Impact summary
               Row(
                 children: [
                   if (option.costDeltaCents != 0) ...[
                     _ImpactChip(
-                      label: option.costDeltaCents > 0 
+                      label: option.costDeltaCents > 0
                           ? '+\$${(option.costDeltaCents / 100).toStringAsFixed(2)}'
                           : '-\$${(-option.costDeltaCents / 100).toStringAsFixed(2)}',
                       isPositive: option.costDeltaCents < 0,
@@ -166,7 +204,8 @@ class _SwapOptionCard extends StatelessWidget {
                   ],
                   if (option.proteinDeltaG != 0) ...[
                     _ImpactChip(
-                      label: '${option.proteinDeltaG > 0 ? '+' : ''}${option.proteinDeltaG.toStringAsFixed(0)}g protein',
+                      label:
+                          '${option.proteinDeltaG > 0 ? '+' : ''}${option.proteinDeltaG.toStringAsFixed(0)}g protein',
                       isPositive: option.proteinDeltaG > 0,
                       icon: Icons.fitness_center,
                     ),
@@ -174,8 +213,11 @@ class _SwapOptionCard extends StatelessWidget {
                   ],
                   if (option.kcalDelta != 0) ...[
                     _ImpactChip(
-                      label: '${option.kcalDelta > 0 ? '+' : ''}${option.kcalDelta.toStringAsFixed(0)} cal',
-                      isPositive: option.kcalDelta.abs() < 50, // Small calorie changes are good
+                      label:
+                          '${option.kcalDelta > 0 ? '+' : ''}${option.kcalDelta.toStringAsFixed(0)} cal',
+                      isPositive:
+                          option.kcalDelta.abs() <
+                          50, // Small calorie changes are good
                       icon: Icons.local_fire_department,
                     ),
                   ],
@@ -206,9 +248,19 @@ class _ReasonBadge extends StatelessWidget {
         textColor = Colors.green;
         icon = Icons.savings;
         break;
+      case SwapReasonType.moreExpensive:
+        backgroundColor = Colors.red.withOpacity(0.1);
+        textColor = Colors.red;
+        icon = Icons.price_change;
+        break;
       case SwapReasonType.higherProtein:
         backgroundColor = Colors.red.withOpacity(0.1);
         textColor = Colors.red;
+        icon = Icons.fitness_center;
+        break;
+      case SwapReasonType.lowerProtein:
+        backgroundColor = Colors.orange.withOpacity(0.1);
+        textColor = Colors.orange;
         icon = Icons.fitness_center;
         break;
       case SwapReasonType.fasterPrep:
@@ -226,6 +278,16 @@ class _ReasonBadge extends StatelessWidget {
         textColor = Colors.purple;
         icon = Icons.analytics;
         break;
+      case SwapReasonType.higherCalories:
+        backgroundColor = Colors.deepOrange.withOpacity(0.1);
+        textColor = Colors.deepOrange;
+        icon = Icons.local_fire_department;
+        break;
+      case SwapReasonType.lowerCalories:
+        backgroundColor = Colors.teal.withOpacity(0.1);
+        textColor = Colors.teal;
+        icon = Icons.ac_unit;
+        break;
     }
 
     return Container(
@@ -238,11 +300,7 @@ class _ReasonBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(
-              icon,
-              size: 12,
-              color: textColor,
-            ),
+            Icon(icon, size: 12, color: textColor),
             const SizedBox(width: 4),
           ],
           Text(
@@ -272,7 +330,7 @@ class _ImpactChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = isPositive ? Colors.green : Colors.red;
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -283,11 +341,7 @@ class _ImpactChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 12,
-            color: color,
-          ),
+          Icon(icon, size: 12, color: color),
           const SizedBox(width: 4),
           Text(
             label,
@@ -320,10 +374,7 @@ class SwapOption {
 }
 
 class SwapReason {
-  const SwapReason({
-    required this.type,
-    required this.description,
-  });
+  const SwapReason({required this.type, required this.description});
 
   final SwapReasonType type;
   final String description;
@@ -331,8 +382,14 @@ class SwapReason {
 
 enum SwapReasonType {
   cheaper,
+  moreExpensive,
   higherProtein,
+  lowerProtein,
   fasterPrep,
   pantryItem,
   betterMacros,
+  higherCalories,
+  lowerCalories,
 }
+
+void _noRecipe(Recipe _) {}

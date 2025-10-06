@@ -10,6 +10,8 @@ class MockProductDetails extends Mock implements ProductDetails {}
 class MockPurchaseDetails extends Mock implements PurchaseDetails {}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('BillingService', () {
     // Note: billingService and mockInAppPurchase available for future test implementation
     // late BillingService billingService;

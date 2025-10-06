@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:macro_budget_meal_planner/core/constants/app_constants.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('AppConstants', () {
     test('should have correct database configuration', () {
       expect(AppConstants.databaseName, 'macro_budget_meal_planner.db');

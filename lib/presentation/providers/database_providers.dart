@@ -13,6 +13,7 @@ import '../../data/services/data_integrity_service.dart';
 import '../../data/services/seed_data_service.dart';
 import '../../data/services/plan_generation_service.dart';
 import '../../data/services/local_storage_service.dart';
+import '../../data/services/recommendation_service.dart';
 import '../../domain/repositories/ingredient_repository.dart';
 import '../../domain/repositories/recipe_repository.dart';
 import '../../domain/repositories/user_targets_repository.dart';
@@ -85,6 +86,10 @@ final seedDataServiceProvider = Provider<SeedDataService>((ref) {
 /// Provider for a very simple plan generation service
 final planGenerationServiceProvider = Provider<PlanGenerationService>((ref) {
   return PlanGenerationService();
+});
+
+final recommendationServiceProvider = Provider<RecommendationService>((ref) {
+  return const RecommendationService();
 });
 
 final dataIntegrityServiceProvider = Provider<DataIntegrityService>((ref) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,9 +10,13 @@ import '../../providers/user_targets_providers.dart';
 import '../../router/app_router.dart';
 import '../../widgets/plan_widgets/totals_bar.dart';
 import '../../widgets/plan_widgets/weekly_plan_grid.dart';
-import '../../widgets/plan_widgets/swap_drawer.dart';
 import '../../../domain/entities/recipe.dart';
+import '../../../domain/entities/plan.dart';
+import '../../../domain/entities/user_targets.dart';
+import '../../widgets/plan_widgets/swap_drawer.dart';
 import '../../providers/database_providers.dart';
+import '../../services/export_service.dart';
+import '../../../domain/entities/ingredient.dart';
 
 // NEW: watch ingredients so we can pass them into WeeklyPlanGrid
 import '../../providers/ingredient_providers.dart';
@@ -26,6 +32,74 @@ class PlanPage extends ConsumerStatefulWidget {
 class _PlanPageState extends ConsumerState<PlanPage> {
   int? selectedMealIndex;
   bool isSwapDrawerOpen = false;
+
+  PlanTotals _recomputeTotals({
+    required Plan plan,
+    required Map<String, Recipe> recipeMap,
+  }) {
+    double kcal = 0;
+    double protein = 0;
+    double carbs = 0;
+    double fat = 0;
+    int costCents = 0;
+
+    for (final day in plan.days) {
+      for (final meal in day.meals) {
+        final recipe = recipeMap[meal.recipeId];
+        if (recipe == null) continue;
+
+        final servings = meal.servings;
+        kcal += recipe.macrosPerServ.kcal * servings;
+        protein += recipe.macrosPerServ.proteinG * servings;
+        carbs += recipe.macrosPerServ.carbsG * servings;
+        fat += recipe.macrosPerServ.fatG * servings;
+        costCents += (recipe.costPerServCents * servings).round();
+      }
+    }
+
+    return PlanTotals(
+      kcal: kcal,
+      proteinG: protein,
+      carbsG: carbs,
+      fatG: fat,
+      costCents: costCents,
+    );
+  }
+
+  Plan _planWithSwappedMeal({
+    required Plan plan,
+    required int dayIndex,
+    required int mealIndex,
+    required String newRecipeId,
+    required Map<String, Recipe> recipeMap,
+  }) {
+    final newDays = plan.days.asMap().entries.map((entry) {
+      final index = entry.key;
+      final day = entry.value;
+
+      if (index != dayIndex) {
+        return day;
+      }
+
+      final newMeals = day.meals.asMap().entries.map((mealEntry) {
+        final currentMealIndex = mealEntry.key;
+        final meal = mealEntry.value;
+
+        if (currentMealIndex != mealIndex) {
+          return meal;
+        }
+
+        return meal.copyWith(recipeId: newRecipeId);
+      }).toList();
+
+      return day.copyWith(meals: newMeals);
+    }).toList();
+
+    final tempPlan = plan.copyWith(days: newDays);
+    final newTotals = _recomputeTotals(plan: tempPlan, recipeMap: recipeMap);
+
+    return tempPlan.copyWith(totals: newTotals);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +161,31 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                   context.go(AppRouter.settings);
                   break;
                 case 'export':
-                  _showExportDialog();
+                  final plan = currentPlanAsync.asData?.value;
+                  final recipes = recipesAsync.asData?.value;
+                  final ingredients = ingredientsAsync.asData?.value;
+
+                  if (plan == null || recipes == null || ingredients == null) {
+                    if (!mounted) {
+                      return;
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Plan data still loading. Try again.'),
+                      ),
+                    );
+                    break;
+                  }
+
+                  final recipeMap = {
+                    for (final recipe in recipes) recipe.id: recipe,
+                  };
+                  final ingredientMap = {
+                    for (final ingredient in ingredients)
+                      ingredient.id: ingredient,
+                  };
+
+                  _showExportChooser(plan, recipeMap, ingredientMap);
                   break;
               }
             },
@@ -175,7 +273,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                     child: GestureDetector(
                                       onTap:
                                           () {}, // Prevent closing when tapping drawer
-                                      child: _buildSwapDrawer(plan, recipeMap),
+                                      child: _buildSwapDrawer(
+                                        plan,
+                                        recipeMap,
+                                        targets,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -280,19 +382,27 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     );
   }
 
-  Widget _buildSwapDrawer(plan, Map<String, Recipe> recipeMap) {
+  Widget _buildSwapDrawer(
+    Plan plan,
+    Map<String, Recipe> recipeMap,
+    UserTargets targets,
+  ) {
+    if (selectedMealIndex == null) return const SizedBox.shrink();
+
     // Get current meal details
     int dayIndex = 0;
     int mealIndex = 0;
     int currentIndex = 0;
+    var found = false;
 
     // Find the selected meal
-    for (int d = 0; d < plan.days.length; d++) {
+    for (int d = 0; d < plan.days.length && !found; d++) {
       final day = plan.days[d];
       for (int m = 0; m < day.meals.length; m++) {
         if (currentIndex == selectedMealIndex) {
           dayIndex = d;
           mealIndex = m;
+          found = true;
           break;
         }
         currentIndex++;
@@ -306,16 +416,80 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       return const SizedBox.shrink();
     }
 
-    // Mock swap options (placeholder)
-    final alternatives = _generateMockSwapOptions(currentRecipe, recipeMap);
+    final mealsInDay = plan.days[dayIndex].meals.length;
+    final perMealCount = mealsInDay < 1 ? 1 : (mealsInDay > 6 ? 6 : mealsInDay);
 
-    return SwapDrawer(
-      currentRecipe: currentRecipe,
-      alternatives: alternatives,
-      onSwapSelected: (newRecipe) {
-        _handleSwapSelected(dayIndex, mealIndex, newRecipe);
+    final perMealKcal = targets.kcal / perMealCount;
+    final perMealProtein = targets.proteinG / perMealCount;
+    final perMealCarbs = targets.carbsG / perMealCount;
+    final perMealFat = targets.fatG / perMealCount;
+
+    int? perMealBudgetCents;
+    if (targets.budgetCents != null) {
+      final dailyBudget = targets.budgetCents! / 7.0;
+      perMealBudgetCents = (dailyBudget / perMealCount).round();
+    }
+
+    final ctx = SwapContext(
+      currentRecipeId: currentRecipe.id,
+      targetKcal: perMealKcal,
+      targetProteinG: perMealProtein,
+      targetCarbsG: perMealCarbs,
+      targetFatG: perMealFat,
+      mealIndex: selectedMealIndex!,
+      targetsId: targets.id,
+      budgetCents: perMealBudgetCents,
+      limit: 12,
+    );
+
+    return Consumer(
+      builder: (context, ref, _) {
+        final suggestionsAsync = ref.watch(swapSuggestionsProvider(ctx));
+
+        return suggestionsAsync.when(
+          loading: () => SwapDrawer.loading(
+            currentRecipe: currentRecipe,
+            onClose: _closeSwapDrawer,
+          ),
+          error: (error, stackTrace) => SwapDrawer.error(
+            currentRecipe: currentRecipe,
+            onClose: _closeSwapDrawer,
+            message: 'Couldn’t load suggestions',
+          ),
+          data: (alternatives) {
+            final fallback = recipeMap.values
+                .where((recipe) => recipe.id != currentRecipe.id)
+                .take(5)
+                .map(
+                  (recipe) => SwapOption(
+                    recipe: recipe,
+                    reasons: const [],
+                    costDeltaCents:
+                        recipe.costPerServCents -
+                        currentRecipe.costPerServCents,
+                    proteinDeltaG:
+                        recipe.macrosPerServ.proteinG -
+                        currentRecipe.macrosPerServ.proteinG,
+                    kcalDelta:
+                        recipe.macrosPerServ.kcal -
+                        currentRecipe.macrosPerServ.kcal,
+                  ),
+                )
+                .toList(growable: false);
+
+            final options = alternatives.isNotEmpty ? alternatives : fallback;
+
+            return SwapDrawer(
+              currentRecipe: currentRecipe,
+              alternatives: options,
+              onSwapSelected: (newRecipe) {
+                unawaited(_handleSwapSelected(dayIndex, mealIndex, newRecipe));
+              },
+              onClose: _closeSwapDrawer,
+            );
+          },
+        );
       },
-      onClose: _closeSwapDrawer,
     );
   }
 
@@ -345,14 +519,51 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     });
   }
 
-  void _handleSwapSelected(int dayIndex, int mealIndex, Recipe newRecipe) {
-    // Implement swapping later
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Swapped to ${newRecipe.name}'),
-        action: SnackBarAction(label: 'Undo', onPressed: () {}),
-      ),
-    );
+  Future<void> _handleSwapSelected(
+    int dayIndex,
+    int mealIndex,
+    Recipe newRecipe,
+  ) async {
+    final planAsync = ref.read(currentPlanProvider);
+    final recipes = await ref.read(allRecipesProvider.future);
+    final recipeMap = {for (final recipe in recipes) recipe.id: recipe};
+    final plan = planAsync.asData?.value;
+
+    if (plan == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No active plan to update')));
+      return;
+    }
+
+    try {
+      final updated = _planWithSwappedMeal(
+        plan: plan,
+        dayIndex: dayIndex,
+        mealIndex: mealIndex,
+        newRecipeId: newRecipe.id,
+        recipeMap: recipeMap,
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.updatePlan(updated);
+
+      if (!mounted) return;
+      setState(() {
+        isSwapDrawerOpen = false;
+        selectedMealIndex = null;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Swapped to ${newRecipe.name}')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to swap: $e')));
+    }
   }
 
   /// Generate a new plan (now also fetching ingredients so the generator
@@ -394,51 +605,62 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     }
   }
 
-  void _showExportDialog() {
+  void _showExportChooser(
+    Plan plan,
+    Map<String, Recipe> recipeMap,
+    Map<String, Ingredient> ingredientMap,
+  ) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => SimpleDialog(
         title: const Text('Export Plan'),
-        content: const Text(
-          'Export functionality will be implemented in Stage 5.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              try {
+                await ExportService.sharePlanText(
+                  plan: plan,
+                  recipes: recipeMap,
+                  ingredients: ingredientMap,
+                );
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Shared as text')));
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+              }
+            },
+            child: const Text('Share as Text (.txt)'),
+          ),
+          SimpleDialogOption(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              try {
+                await ExportService.sharePlanCsv(
+                  plan: plan,
+                  recipes: recipeMap,
+                  ingredients: ingredientMap,
+                );
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Shared as CSV')));
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+              }
+            },
+            child: const Text('Share as CSV (.csv)'),
           ),
         ],
       ),
     );
-  }
-
-  List<SwapOption> _generateMockSwapOptions(
-    Recipe currentRecipe,
-    Map<String, Recipe> recipeMap,
-  ) {
-    final alternatives = recipeMap.values
-        .where((r) => r.id != currentRecipe.id)
-        .take(3)
-        .map(
-          (r) => SwapOption(
-            recipe: r,
-            reasons: const [
-              SwapReason(
-                type: SwapReasonType.cheaper,
-                description: 'Save \$2.50/week',
-              ),
-              SwapReason(
-                type: SwapReasonType.higherProtein,
-                description: '+15g protein',
-              ),
-            ],
-            costDeltaCents: -250,
-            proteinDeltaG: 15,
-            kcalDelta: -50,
-          ),
-        )
-        .toList();
-
-    return alternatives;
   }
 }

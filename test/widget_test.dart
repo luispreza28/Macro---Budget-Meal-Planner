@@ -64,6 +64,8 @@ class MockUserTargetsRepository implements UserTargetsRepository {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   testWidgets('App loads successfully', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     await tester.pumpWidget(
