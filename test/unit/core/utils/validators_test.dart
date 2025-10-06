@@ -6,6 +6,8 @@ import 'package:macro_budget_meal_planner/domain/entities/recipe.dart';
 import 'package:macro_budget_meal_planner/domain/entities/user_targets.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Validators Tests', () {
     group('Ingredient Validation', () {
       test('should validate correct ingredient', () {

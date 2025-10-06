@@ -8,6 +8,8 @@ import 'package:macro_budget_meal_planner/domain/entities/recipe.dart';
 import 'package:macro_budget_meal_planner/domain/entities/user_targets.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   const baseIngredient = Ingredient(
     id: 'base',
     name: 'Base Ingredient',

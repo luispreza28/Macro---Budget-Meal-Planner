@@ -8,6 +8,8 @@ class MockAppDatabase extends Mock implements AppDatabase {}
 class MockIngredients extends Mock implements $IngredientsTable {}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('IngredientRepositoryImpl Tests', () {
     late MockAppDatabase mockDatabase;
     late IngredientRepositoryImpl repository;

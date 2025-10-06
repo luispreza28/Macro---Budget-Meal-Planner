@@ -3,6 +3,8 @@ import 'package:macro_budget_meal_planner/domain/entities/recipe.dart';
 import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Recipe Entity Tests', () {
     late Recipe testRecipe;
 

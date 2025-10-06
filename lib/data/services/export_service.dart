@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -182,14 +183,18 @@ class ExportService {
     String? subject,
   }) async {
     try {
-      // Create temporary file
-      final directory = await getTemporaryDirectory();
-      final file = File('${directory.path}/$filename');
-      await file.writeAsString(content);
+      final isCsv = filename.toLowerCase().endsWith('.csv');
+      final file = isCsv
+          ? await _writeTempCsv(filename, content)
+          : await _writeTempFile(filename, content);
+
+      final xFile = isCsv
+          ? XFile(file.path, name: filename, mimeType: 'text/csv')
+          : XFile(file.path, name: filename);
 
       // Share the file
       await Share.shareXFiles(
-        [XFile(file.path)],
+        [xFile],
         subject: subject ?? 'Macro + Budget Meal Planner Export',
       );
     } catch (e) {
@@ -251,6 +256,27 @@ class ExportService {
   static double _calculateMealCost(PlanMeal meal, List<Ingredient> ingredients) {
     // Placeholder implementation - in real app would calculate from recipe ingredients
     return 3.50;
+  }
+
+  static Future<File> _writeTempFile(String filename, String contents) async {
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/$filename');
+    return file.writeAsString(contents, flush: true);
+  }
+
+  static Future<File> _writeTempCsv(String filename, String csvBody) async {
+    final normalized = csvBody
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n')
+        .join('\r\n');
+
+    final bom = utf8.encode('\uFEFF');
+    final bytes = <int>[]..addAll(bom)..addAll(utf8.encode(normalized));
+
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/$filename');
+    return file.writeAsBytes(bytes, flush: true);
   }
 }
 

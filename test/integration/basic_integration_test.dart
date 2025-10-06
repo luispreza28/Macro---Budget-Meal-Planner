@@ -1,13 +1,93 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'package:macro_budget_meal_planner/presentation/providers/database_providers.dart';
 import 'package:macro_budget_meal_planner/core/utils/logger.dart';
 import 'package:macro_budget_meal_planner/core/errors/error_handler.dart';
 import 'package:macro_budget_meal_planner/core/errors/failures.dart';
 
+class _TestPathProviderPlatform extends PathProviderPlatform {
+  _TestPathProviderPlatform() : super();
+
+  final Directory _root =
+      Directory.systemTemp.createTempSync('integration_path_provider_');
+
+  String _subdir(String name) {
+    final directory = Directory('${_root.path}/$name');
+    if (!directory.existsSync()) {
+      directory.createSync(recursive: true);
+    }
+    return directory.path;
+  }
+
+  @override
+  Future<String?> getTemporaryPath() async => _subdir('temp');
+
+  @override
+  Future<String?> getApplicationSupportPath() async =>
+      _subdir('application_support');
+
+  @override
+  Future<String?> getLibraryPath() async => _subdir('library');
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async =>
+      _subdir('application_documents');
+
+  @override
+  Future<String?> getApplicationCachePath() async => _subdir('application_cache');
+
+  @override
+  Future<String?> getExternalStoragePath() async =>
+      _subdir('external_storage/default');
+
+  @override
+  Future<List<String>?> getExternalCachePaths() async =>
+      <String>[_subdir('external_storage/cache')];
+
+  @override
+  Future<List<String>?> getExternalStoragePaths(
+      {StorageDirectory? type}) async {
+    final suffix = type?.name ?? 'default';
+    return <String>[_subdir('external_storage/$suffix')];
+  }
+
+  @override
+  Future<String?> getDownloadsPath() async => _subdir('downloads');
+
+  void dispose() {
+    if (_root.existsSync()) {
+      try {
+        _root.deleteSync(recursive: true);
+      } on FileSystemException {
+        // Ignore cleanup failures in tests where handles may still be open.
+      }
+    }
+  }
+}
+
 void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  late PathProviderPlatform originalPathProvider;
+  late _TestPathProviderPlatform fakePathProvider;
+
+  setUpAll(() {
+    originalPathProvider = PathProviderPlatform.instance;
+    fakePathProvider = _TestPathProviderPlatform();
+    PathProviderPlatform.instance = fakePathProvider;
+  });
+
+  tearDownAll(() {
+    PathProviderPlatform.instance = originalPathProvider;
+    fakePathProvider.dispose();
+  });
+
   group('Basic Integration Tests', () {
     setUpAll(() async {
       // Set up logging for tests
