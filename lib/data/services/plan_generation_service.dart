@@ -5,15 +5,17 @@ import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
 import '../../domain/entities/user_targets.dart';
-import '../../domain/repositories/plan_repository.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
 /// Falls back to Recipe.macrosPerServ and costPerServCents if items are missing.
 class PlanGenerationService {
-  PlanGenerationService(this._planRepository);
+  PlanGenerationService({Random? rng}) : _rng = rng ?? Random();
 
-  final PlanRepository _planRepository;
+  final Random _rng;
 
+  /// Generates a weekly plan from inputs.
+  /// NOTE: This method is pure and **does not persist** the plan. Callers are
+  /// responsible for saving and setting the current plan.
   Future<Plan> generate({
     required UserTargets targets,
     required List<Recipe> recipes,
@@ -25,23 +27,73 @@ class PlanGenerationService {
 
     final ingById = {for (final i in ingredients) i.id: i};
 
-    final mealsPerDay = targets.mealsPerDay.clamp(2, 5);
-    final rng = Random();
+    final int mealsPerDay = targets.mealsPerDay.clamp(1, 6) as int;
+    final rng = _rng;
     final all = [...recipes];
-    final List<Recipe> itemized = all.where((r) => r.items.isNotEmpty).toList();
-    final List<Recipe> nonItemized = all.where((r) => r.items.isEmpty).toList();
+    final itemized = all.where((r) => r.items.isNotEmpty).toList();
+    final nonItemized = all.where((r) => r.items.isEmpty).toList();
 
-    final List<Recipe> pickPool;
-    if (itemized.isNotEmpty) {
-      pickPool = itemized;
-    } else {
-      pickPool = nonItemized;
+    final int mealsNeeded = 7 * mealsPerDay;
+    final int desiredPoolSize =
+        (mealsNeeded * 2).clamp(mealsNeeded, 200) as int;
+
+    const double itemizedWeight = 0.75;
+    int targetItemized = (desiredPoolSize * itemizedWeight).round();
+    int targetNonItemized = desiredPoolSize - targetItemized;
+
+    final int availableItemized = itemized.length;
+    final int availableNonItemized = nonItemized.length;
+
+    if (availableItemized < targetItemized) {
+      final int deficit = targetItemized - availableItemized;
+      targetItemized = availableItemized;
+      final int borrowed = targetNonItemized + deficit;
+      targetNonItemized = borrowed > availableNonItemized
+          ? availableNonItemized
+          : borrowed;
     }
 
-    final pool = [...pickPool]..shuffle(rng);
+    if (availableNonItemized < targetNonItemized) {
+      final int deficit = targetNonItemized - availableNonItemized;
+      targetNonItemized = availableNonItemized;
+      final int borrowed = targetItemized + deficit;
+      targetItemized = borrowed > availableItemized
+          ? availableItemized
+          : borrowed;
+    }
+
+    if (availableItemized == 0 && availableNonItemized == 0) {
+      throw StateError('No recipes available to build a plan.');
+    }
+
+    List<T> _sample<T>(List<T> list, int n) {
+      if (list.isEmpty || n <= 0) return <T>[];
+      final copy = [...list]..shuffle(rng);
+      final int takeCount = n < 0 ? 0 : (n > list.length ? list.length : n);
+      return copy.take(takeCount).toList();
+    }
+
+    final sampledItemized = _sample(itemized, targetItemized);
+    final sampledNonItemized = _sample(nonItemized, targetNonItemized);
+
+    final pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
+      ..shuffle(rng);
+
+    while (pool.length < mealsNeeded) {
+      if (itemized.isNotEmpty) {
+        pool.add(itemized[rng.nextInt(itemized.length)]);
+      } else if (nonItemized.isNotEmpty) {
+        pool.add(nonItemized[rng.nextInt(nonItemized.length)]);
+      } else {
+        break;
+      }
+    }
+
+    if (pool.isEmpty) {
+      throw StateError('Unable to build a recipe pool for planning.');
+    }
 
     final List<PlanDay> days = [];
-    int mealCursor = 0;
 
     double totalKcal = 0;
     double totalProtein = 0;
@@ -49,11 +101,34 @@ class PlanGenerationService {
     double totalFat = 0;
     int totalCostCents = 0;
 
+    Recipe? lastPicked;
+    int poolCursor = 0;
+
+    Recipe _pickWithNoImmediateRepeat(Set<String> usedThisDay) {
+      for (int attempt = 0; attempt < pool.length; attempt++) {
+        final int index = (poolCursor + attempt) % pool.length;
+        final candidate = pool[index];
+        final bool repeatsLast = candidate.id == lastPicked?.id;
+        final bool usedInDay = usedThisDay.contains(candidate.id);
+        if (!repeatsLast && !usedInDay) {
+          poolCursor = (index + 1) % pool.length;
+          return candidate;
+        }
+      }
+
+      final fallback = pool[poolCursor % pool.length];
+      poolCursor = (poolCursor + 1) % pool.length;
+      return fallback;
+    }
+
     for (int d = 0; d < 7; d++) {
       final List<PlanMeal> meals = [];
+      final usedThisDay = <String>{};
+
       for (int m = 0; m < mealsPerDay; m++) {
-        final recipe = pool[mealCursor % pool.length];
-        mealCursor++;
+        final recipe = _pickWithNoImmediateRepeat(usedThisDay);
+        usedThisDay.add(recipe.id);
+        lastPicked = recipe;
 
         const servings = 1.0;
 
@@ -93,8 +168,6 @@ class PlanGenerationService {
       createdAt: DateTime.now(),
     );
 
-    // Persist the generated plan before returning so it survives restarts.
-    await _planRepository.addPlan(plan);
     return plan;
   }
 

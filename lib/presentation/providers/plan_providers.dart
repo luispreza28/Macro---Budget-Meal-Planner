@@ -10,10 +10,10 @@ final allPlansProvider = StreamProvider<List<Plan>>((ref) {
   return repository.watchAllPlans();
 });
 
-/// Provider for current active plan
+/// Provider for current active plan (explicitly user-selected)
 final currentPlanProvider = StreamProvider<Plan?>((ref) {
   final repository = ref.watch(planRepositoryProvider);
-  return repository.watchLatestPlan();
+  return repository.watchCurrentPlan();
 });
 
 /// Provider for recent plans

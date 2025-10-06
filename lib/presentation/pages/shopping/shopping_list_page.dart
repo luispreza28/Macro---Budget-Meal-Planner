@@ -9,10 +9,9 @@ import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart'
 import '../../router/app_router.dart';
 import '../../providers/shopping_list_providers.dart';
 import '../../providers/database_providers.dart';
-import '../../../data/services/local_storage_service.dart';
 import '../../providers/plan_providers.dart';
 
-/// Weekly Shopping List built from the current planâ€™s recipe.items.
+/// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
 /// by aisle. Includes aisle summary chips, checkboxes, and export to clipboard.
 class ShoppingListPage extends ConsumerStatefulWidget {
@@ -25,46 +24,36 @@ class ShoppingListPage extends ConsumerStatefulWidget {
 class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
   /// Track checked items by a stable key: "<ingredientId>|<unit>"
   Set<String> _checked = <String>{};
-
-  LocalStorageService? _storage;
-  String? _persistKey; // e.g., shopping_checked_<planId>
-  bool _loadedForPlan = false;
+  // Track which plan's checked state is currently loaded.
+  String? _loadedPlanId;
+  late final ProviderSubscription<AsyncValue<dynamic>> _planListener;
+  @override
+  void initState() {
+    super.initState();
+    // Listen to plan changes OUTSIDE build.
+    _planListener = ref.listenManual<AsyncValue<dynamic>>(currentPlanProvider, (
+      prev,
+      next,
+    ) {
+      next.whenOrNull(
+        data: (plan) {
+          final planId = plan?.id;
+          _onPlanChanged(planId);
+        },
+      );
+    });
+    final initialPlan = ref.read(currentPlanProvider).asData?.value;
+    _onPlanChanged(initialPlan?.id);
+  }
 
   @override
   void dispose() {
-    _saveChecked();
+    _planListener.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentPlanAsync = ref.watch(currentPlanProvider);
-
-    currentPlanAsync.whenData((plan) {
-      final planId = plan?.id;
-      if (planId == null) {
-        return;
-      }
-
-      final key = 'shopping_checked_$planId';
-      if (_persistKey == key && _loadedForPlan) {
-        return;
-      }
-
-      _persistKey = key;
-      _storage ??= LocalStorageService(ref.read(sharedPreferencesProvider));
-      final saved = _storage!.getStringList(key);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _checked = saved?.toSet() ?? <String>{};
-        _loadedForPlan = true;
-      });
-    });
-
     // IMPORTANT: shoppingListItemsProvider resolves asynchronously via FutureProvider.
     final groupedAsync = ref.watch(shoppingListItemsProvider);
     final groupedData =
@@ -99,7 +88,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                 ? null
                 : () {
                     setState(() => _checked.clear());
-                    _saveChecked();
+                    _saveCheckedForPlan();
                   },
             icon: const Icon(Icons.checklist_rtl_outlined),
           ),
@@ -148,7 +137,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                     children: summary
                         .map(
                           (s) => _AisleChip(
-                            label: '${s.aisleLabel} Â· ${s.count}',
+                            label: '${s.aisleLabel} Ã‚Â· ${s.count}',
                           ),
                         )
                         .toList(),
@@ -203,10 +192,41 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
     );
   }
 
-  void _saveChecked() {
-    if (_persistKey == null) return;
-    _storage ??= LocalStorageService(ref.read(sharedPreferencesProvider));
-    _storage!.setStringList(_persistKey!, _checked.toList());
+  void _onPlanChanged(String? planId) {
+    if (planId == _loadedPlanId) return;
+
+    if (planId == null) {
+      setState(() {
+        _checked.clear();
+        _loadedPlanId = null;
+      });
+      return;
+    }
+
+    _loadCheckedForPlan(planId);
+  }
+
+  Future<void> _loadCheckedForPlan(String planId) async {
+    final prefs = ref.read(sharedPreferencesProvider);
+    final key = 'shopping_checked_$planId';
+    final saved = prefs.getStringList(key);
+
+    if (!mounted) return;
+    setState(() {
+      _checked
+        ..clear()
+        ..addAll(saved?.toSet() ?? const <String>{});
+      _loadedPlanId = planId;
+    });
+  }
+
+  Future<void> _saveCheckedForPlan() async {
+    final planId = _loadedPlanId;
+    if (planId == null) return;
+
+    final prefs = ref.read(sharedPreferencesProvider);
+    final key = 'shopping_checked_$planId';
+    await prefs.setStringList(key, _checked.toList());
   }
 
   // ---------- Check helpers ----------
@@ -223,7 +243,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         _checked.add(k);
       }
     });
-    _saveChecked();
+    _saveCheckedForPlan();
   }
 
   String _itemKey(AggregatedShoppingItem i) =>

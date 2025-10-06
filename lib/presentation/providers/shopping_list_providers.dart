@@ -95,13 +95,17 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
     final ingMeta = ingredientById[id];
     if (ingMeta == null) return;
 
-    // FIX: keep cost in CENTS (don’t divide by 100 here)
-    final estimatedCostCents = (totalQty * ingMeta.pricePerUnitCents).round();
+    int estimatedCostCents;
+
+    final packPrice = ingMeta.purchasePack.priceCents;
+    final packQty = ingMeta.purchasePack.qty;
 
     int? packs;
-    if (ingMeta.purchasePack.priceCents != null &&
-        ingMeta.purchasePack.qty > 0) {
-      packs = (totalQty / ingMeta.purchasePack.qty).ceil();
+    if (packPrice != null && packQty > 0) {
+      packs = (totalQty / packQty).ceil();
+      estimatedCostCents = packs * packPrice;
+    } else {
+      estimatedCostCents = (totalQty * ingMeta.pricePerUnitCents).round();
     }
 
     flat.add(
@@ -155,12 +159,15 @@ double _toIngredientUnit({
 }) {
   if (from == to) return qty;
 
-  // Simple strategy:
-  // - grams <-> grams (same)
-  // - ml <-> ml (same)
-  // - piece to grams/ml cannot be converted without a mapping; keep as-is
-  // - grams <-> ml need density to be correct; keep as-is
-  // This will keep data consistent for your seeded items, which already match.
+  const double densityGPerMl = 1.0;
+
+  if (from == ing.Unit.grams && to == ing.Unit.milliliters) {
+    return qty / densityGPerMl;
+  }
+  if (from == ing.Unit.milliliters && to == ing.Unit.grams) {
+    return qty * densityGPerMl;
+  }
+
   return qty;
 }
 
@@ -173,7 +180,11 @@ final shoppingListDebugProvider = FutureProvider<String>((ref) async {
   final rc = recipes?.length ?? 0;
   final ic = ingredients?.length ?? 0;
 
-  int meals = 0, missingRecipe = 0, emptyItems = 0, missingIngredient = 0, ok = 0;
+  int meals = 0,
+      missingRecipe = 0,
+      emptyItems = 0,
+      missingIngredient = 0,
+      ok = 0;
   final recipeById = {for (final r in (recipes ?? [])) r.id: r};
   final ingredientById = {for (final i in (ingredients ?? [])) i.id: i};
 
@@ -181,17 +192,26 @@ final shoppingListDebugProvider = FutureProvider<String>((ref) async {
     for (final meal in day.meals) {
       meals++;
       final r = recipeById[meal.recipeId];
-      if (r == null) { missingRecipe++; continue; }
-      if (r.items.isEmpty) { emptyItems++; continue; }
+      if (r == null) {
+        missingRecipe++;
+        continue;
+      }
+      if (r.items.isEmpty) {
+        emptyItems++;
+        continue;
+      }
       bool anyMissing = false;
       for (final it in r.items) {
-        if (!ingredientById.containsKey(it.ingredientId)) { anyMissing = true; missingIngredient++; }
+        if (!ingredientById.containsKey(it.ingredientId)) {
+          anyMissing = true;
+          missingIngredient++;
+        }
       }
       if (!anyMissing) ok++;
     }
   }
 
   return 'Plan ok. Recipes: $rc, Ingredients: $ic, Meals: $meals, '
-         'MissingRecipe: $missingRecipe, EmptyItems: $emptyItems, '
-         'MissingIngredientRefs: $missingIngredient, MealsUsable: $ok';
+      'MissingRecipe: $missingRecipe, EmptyItems: $emptyItems, '
+      'MissingIngredientRefs: $missingIngredient, MealsUsable: $ok';
 });

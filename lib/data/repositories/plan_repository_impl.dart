@@ -6,11 +6,15 @@ import 'package:drift/drift.dart';
 import '../../domain/entities/plan.dart' as domain;
 import '../../domain/repositories/plan_repository.dart';
 import '../datasources/database.dart';
+import '../services/local_storage_service.dart';
 
 class PlanRepositoryImpl implements PlanRepository {
-  PlanRepositoryImpl(this._db);
+  PlanRepositoryImpl(this._db, this._local);
 
   final AppDatabase _db;
+  final LocalStorageService _local;
+  final StreamController<String?> _currentPlanIdController =
+      StreamController<String?>.broadcast();
 
   @override
   Future<void> addPlan(domain.Plan plan) async {
@@ -49,7 +53,16 @@ class PlanRepositoryImpl implements PlanRepository {
   }
 
   @override
-  Future<domain.Plan?> getCurrentPlan() => _latestPlan();
+  Future<domain.Plan?> getCurrentPlan() async {
+    final currentId = _local.getCurrentPlanId();
+    if (currentId != null && currentId.isNotEmpty) {
+      final plan = await getPlanById(currentId);
+      if (plan != null) {
+        return plan;
+      }
+    }
+    return _latestPlan();
+  }
 
   @override
   Future<List<domain.Plan>> getRecentPlans({int limit = 10}) async {
@@ -75,16 +88,14 @@ class PlanRepositoryImpl implements PlanRepository {
 
   @override
   Future<void> setCurrentPlan(String planId) async {
-    final now = DateTime.now();
-    await (_db.update(_db.plans)..where((tbl) => tbl.id.equals(planId))).write(
-      PlansCompanion(createdAt: Value(now), updatedAt: Value(now)),
-    );
+    await _local.setCurrentPlanId(planId);
+    _notifyCurrentPlanId(planId);
   }
 
   @override
   Future<void> clearCurrentPlan() async {
-    // With the "latest plan" strategy there is no separate current marker,
-    // so clearing simply becomes a no-op.
+    await _local.clearCurrentPlanId();
+    _notifyCurrentPlanId(null);
   }
 
   @override
@@ -180,14 +191,52 @@ class PlanRepositoryImpl implements PlanRepository {
 
   @override
   Future<void> cleanupOldPlans({int keepCount = 50}) async {
-    final rows =
-        await (_db.select(_db.plans)
-              ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
-              ..limit(keepCount, offset: keepCount))
-            .get();
-    if (rows.isEmpty) return;
-    final ids = rows.map((row) => row.id).toList(growable: false);
-    await (_db.delete(_db.plans)..where((tbl) => tbl.id.isIn(ids))).go();
+    // Normalize keepCount
+    final safeKeep = keepCount < 0 ? 0 : keepCount;
+
+    await _db.transaction(() async {
+      // 1) Count total plans
+      final totalCount = await (_db.selectOnly(_db.plans)
+            ..addColumns([_db.plans.id.count()]))
+          .map((row) => row.read(_db.plans.id.count()) ?? 0)
+          .getSingle();
+
+      // Nothing to do if <= safeKeep
+      if (totalCount <= safeKeep) return;
+
+      // 2) Collect IDs to KEEP (the newest `safeKeep` by createdAt DESC)
+      final keepRows = await (_db.select(_db.plans)
+            ..orderBy([(p) => OrderingTerm.desc(p.createdAt)])
+            ..limit(safeKeep))
+          .get();
+      final keepIds = keepRows.map((r) => r.id).toSet();
+
+      // 3) Collect IDs to DELETE (everything NOT in keepIds)
+      //    (We fetch in a second query to avoid large offsets and to be explicit.)
+      final allRows = await (_db.select(_db.plans)
+            ..orderBy([(p) => OrderingTerm.desc(p.createdAt)]))
+          .get();
+
+      final idsToDelete = <String>[];
+      for (final r in allRows) {
+        if (!keepIds.contains(r.id)) {
+          idsToDelete.add(r.id);
+        }
+      }
+
+      if (idsToDelete.isEmpty) return;
+
+      // 4) Safety: don’t delete the explicitly active plan if set in prefs
+      //    (This ensures we never orphan the “current plan” marker.)
+      final currentId = _local.getCurrentPlanId(); // LocalStorageService
+      if (currentId != null && currentId.isNotEmpty) {
+        idsToDelete.remove(currentId);
+      }
+      if (idsToDelete.isEmpty) return;
+
+      // 5) Delete
+      await (_db.delete(_db.plans)..where((tbl) => tbl.id.isIn(idsToDelete))).go();
+    });
   }
 
   @override
@@ -214,7 +263,56 @@ class PlanRepositoryImpl implements PlanRepository {
   }
 
   @override
-  Stream<domain.Plan?> watchCurrentPlan() => watchLatestPlan();
+  Stream<domain.Plan?> watchCurrentPlan() {
+    StreamSubscription<String?>? markerSub;
+    StreamSubscription<domain.Plan?>? planSub;
+    late final StreamController<domain.Plan?> controller;
+
+    void switchTo(String? id) {
+      final previousSub = planSub;
+      planSub = null;
+      if (previousSub != null) {
+        unawaited(previousSub.cancel());
+      }
+
+      if (id == null || id.isEmpty) {
+        controller.add(null);
+        return;
+      }
+
+      planSub = _watchPlanById(
+        id,
+      ).listen(controller.add, onError: controller.addError);
+    }
+
+    controller = StreamController<domain.Plan?>(
+      onListen: () {
+        switchTo(_local.getCurrentPlanId());
+        markerSub = _currentPlanIdController.stream.listen(
+          switchTo,
+          onError: controller.addError,
+        );
+      },
+      onCancel: () async {
+        final futures = <Future<void>>[];
+        final currentPlanSub = planSub;
+        final currentMarkerSub = markerSub;
+        planSub = null;
+        markerSub = null;
+        if (currentPlanSub != null) {
+          futures.add(currentPlanSub.cancel());
+        }
+        if (currentMarkerSub != null) {
+          futures.add(currentMarkerSub.cancel());
+        }
+        if (futures.isNotEmpty) {
+          await Future.wait(futures);
+        }
+      },
+    );
+
+    return controller.stream;
+  }
 
   @override
   Stream<List<domain.Plan>> watchRecentPlans({int limit = 10}) {
@@ -236,9 +334,16 @@ class PlanRepositoryImpl implements PlanRepository {
     final query = (_db.select(_db.plans)
       ..orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)])
       ..limit(1));
+
     return query.watch().map(
       (rows) => rows.isEmpty ? null : _mapRow(rows.first),
     );
+  }
+
+  void _notifyCurrentPlanId(String? planId) {
+    if (!_currentPlanIdController.isClosed) {
+      _currentPlanIdController.add(planId);
+    }
   }
 
   Future<domain.Plan?> _latestPlan() async {
@@ -247,6 +352,16 @@ class PlanRepositoryImpl implements PlanRepository {
       ..limit(1));
     final row = await query.getSingleOrNull();
     return row == null ? null : _mapRow(row);
+  }
+
+  Stream<domain.Plan?> _watchPlanById(String id) {
+    final query = (_db.select(_db.plans)
+      ..where((tbl) => tbl.id.equals(id))
+      ..limit(1));
+
+    return query.watch().map(
+      (rows) => rows.isEmpty ? null : _mapRow(rows.first),
+    );
   }
 
   PlansCompanion _toCompanion(domain.Plan plan, {required DateTime updatedAt}) {
@@ -291,3 +406,4 @@ class PlanRepositoryImpl implements PlanRepository {
     );
   }
 }
+

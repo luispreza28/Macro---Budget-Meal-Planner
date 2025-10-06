@@ -221,16 +221,15 @@ class MockPlanRepository implements PlanRepository {
 
   @override
   Stream<Plan?> watchLatestPlan() async* {
-    Plan? latest() {
-      if (_plans.isEmpty) return null;
-      return _plans.reduce((a, b) => a.createdAt.isAfter(b.createdAt) ? a : b);
+    Plan? selectLatest(List<Plan> snapshot) {
+      if (snapshot.isEmpty) return null;
+      return snapshot.reduce(
+        (a, b) => a.createdAt.isAfter(b.createdAt) ? a : b,
+      );
     }
 
-    yield latest();
-    yield* _plansCtrl.stream.map((plans) {
-      if (plans.isEmpty) return null;
-      return plans.reduce((a, b) => a.createdAt.isAfter(b.createdAt) ? a : b);
-    });
+    yield selectLatest(_plans);
+    yield* _plansCtrl.stream.map(selectLatest);
   }
 
   @override

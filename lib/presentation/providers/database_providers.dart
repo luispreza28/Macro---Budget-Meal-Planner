@@ -12,6 +12,7 @@ import '../../data/repositories/plan_repository_impl.dart';
 import '../../data/services/data_integrity_service.dart';
 import '../../data/services/seed_data_service.dart';
 import '../../data/services/plan_generation_service.dart';
+import '../../data/services/local_storage_service.dart';
 import '../../domain/repositories/ingredient_repository.dart';
 import '../../domain/repositories/recipe_repository.dart';
 import '../../domain/repositories/user_targets_repository.dart';
@@ -55,10 +56,16 @@ final pantryRepositoryProvider = Provider<PantryRepository>((ref) {
   );
 });
 
+final localStorageServiceProvider = Provider<LocalStorageService>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return LocalStorageService(prefs);
+});
+
 /// Provider for plan repository backed by Drift storage
 final planRepositoryProvider = Provider<PlanRepository>((ref) {
   final database = ref.watch(databaseProvider);
-  return PlanRepositoryImpl(database);
+  final localStorage = ref.watch(localStorageServiceProvider);
+  return PlanRepositoryImpl(database, localStorage);
 });
 
 /// Provider for price override repository - Temporarily disabled due to interface mismatch
@@ -77,8 +84,7 @@ final seedDataServiceProvider = Provider<SeedDataService>((ref) {
 
 /// Provider for a very simple plan generation service
 final planGenerationServiceProvider = Provider<PlanGenerationService>((ref) {
-  final planRepository = ref.watch(planRepositoryProvider);
-  return PlanGenerationService(planRepository);
+  return PlanGenerationService();
 });
 
 final dataIntegrityServiceProvider = Provider<DataIntegrityService>((ref) {
