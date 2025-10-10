@@ -2,6 +2,7 @@ import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/recipe.dart';
 import '../../domain/repositories/ingredient_repository.dart';
 import '../../domain/repositories/recipe_repository.dart';
+import '../seed/seed_ingredients.dart';
 
 /// Service for managing seed data (ingredients and recipes)
 class SeedDataService {
@@ -22,12 +23,61 @@ class SeedDataService {
     if (recipeCount == 0) {
       await _seedRecipes();
     }
+
+    // Apply one-time patch for specific IDs used in debug scenarios.
+    // Idempotent: fills only missing nutrition/price fields when possible.
+    await _applySeedPatch();
   }
 
   /// Seed ingredients database with initial data
   Future<void> _seedIngredients() async {
     final ingredients = _getSeedIngredients();
     await _ingredientRepository.bulkInsertIngredients(ingredients);
+  }
+
+  /// Upsert/patch a few specific ingredients by id to ensure non-zero totals.
+  Future<void> _applySeedPatch() async {
+    final seeds = seedPatchIngredients();
+    for (final seed in seeds) {
+      final existing = await _ingredientRepository.getIngredientById(seed.id);
+      if (existing == null) {
+        await _ingredientRepository.addIngredient(seed);
+        continue;
+      }
+
+      // Only fill missing macro or price info; avoid overwriting user edits
+      final existingPer100 = existing.macrosPer100g;
+      final per100IsZero = (existingPer100.kcal == 0 &&
+          existingPer100.proteinG == 0 &&
+          existingPer100.carbsG == 0 &&
+          existingPer100.fatG == 0);
+
+      final newPer100 = per100IsZero ? seed.macrosPer100g : existingPer100;
+
+      // Price: prefer not to overwrite; fill only when clearly missing/zero
+      final patchedPricePerUnit = existing.pricePerUnitCents > 0
+          ? existing.pricePerUnitCents
+          : seed.pricePerUnitCents;
+
+      final patchedPack = PurchasePack(
+        qty: existing.purchasePack.qty > 0
+            ? existing.purchasePack.qty
+            : seed.purchasePack.qty,
+        unit: existing.purchasePack.unit,
+        priceCents: existing.purchasePack.priceCents ?? seed.purchasePack.priceCents,
+      );
+
+      final patched = existing.copyWith(
+        macrosPer100g: newPer100,
+        pricePerUnitCents: patchedPricePerUnit,
+        purchasePack: patchedPack,
+      );
+
+      // Only update if something changed
+      if (patched != existing) {
+        await _ingredientRepository.updateIngredient(patched);
+      }
+    }
   }
 
   /// Seed recipes database with initial data

@@ -149,6 +149,61 @@ class IngredientRepositoryImpl implements IngredientRepository {
         .map((ingredient) => ingredient != null ? _mapToEntity(ingredient) : null);
   }
 
+  @override
+  Future<void> upsertNutritionAndPrice({
+    required String id,
+    required domain.NutritionPer100 per100,
+    required domain.Unit unit,
+    int? pricePerUnitCents,
+    double packQty = 0,
+    int? packPriceCents,
+  }) async {
+    final existing = await (_database.select(_database.ingredients)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+
+    final name = existing?.name ?? _humanizeId(id);
+    final aisle = existing?.aisle ?? domain.Aisle.pantry.value;
+    final tags = existing?.tags ?? '[]';
+    final source = existing?.source ?? domain.IngredientSource.manual.value;
+    final now = DateTime.now();
+
+    final unitStr = unit.value;
+    final int pricePerUnit = pricePerUnitCents ?? existing?.pricePerUnitCents ?? 0;
+    final double packQtyUse = (packQty > 0)
+        ? packQty
+        : (existing != null ? existing.purchasePackQty : 0);
+    final String packUnitUse = unitStr; // align purchase pack unit with base unit
+    final int? packPriceUse = packPriceCents ?? existing?.purchasePackPriceCents;
+
+    final companion = IngredientsCompanion(
+      id: Value(id),
+      name: Value(name),
+      unit: Value(unitStr),
+      kcalPer100g: Value(per100.kcal),
+      proteinPer100g: Value(per100.proteinG),
+      carbsPer100g: Value(per100.carbsG),
+      fatPer100g: Value(per100.fatG),
+      pricePerUnitCents: Value(pricePerUnit),
+      purchasePackQty: Value(packQtyUse),
+      purchasePackUnit: Value(packUnitUse),
+      purchasePackPriceCents: Value(packPriceUse),
+      aisle: Value(aisle),
+      tags: Value(tags),
+      source: Value(source),
+      lastVerifiedAt: Value(now),
+      updatedAt: Value(now),
+    );
+
+    if (existing == null) {
+      await _database.into(_database.ingredients).insert(companion);
+    } else {
+      await (_database.update(_database.ingredients)
+            ..where((t) => t.id.equals(id)))
+          .write(companion);
+    }
+  }
+
   /// Maps database row to domain entity
   domain.Ingredient _mapToEntity(Ingredient data) {
     return domain.Ingredient(
@@ -218,5 +273,16 @@ class IngredientRepositoryImpl implements IngredientRepository {
   String _encodeJsonStringList(List<String> list) {
     if (list.isEmpty) return '[]';
     return '[${list.map((s) => '"$s"').join(',')}]';
+  }
+
+  String _humanizeId(String id) {
+    final base = id.replaceAll(RegExp(r'^[^a-zA-Z0-9]+'), '');
+    return base
+        .replaceAll('_', ' ')
+        .trim()
+        .split(' ')
+        .where((w) => w.isNotEmpty)
+        .map((w) => w[0].toUpperCase() + w.substring(1))
+        .join(' ');
   }
 }

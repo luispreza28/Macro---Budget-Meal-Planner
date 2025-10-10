@@ -1,0 +1,260 @@
+﻿import 'package:flutter/foundation.dart';
+import '../../domain/entities/ingredient.dart';
+import '../../domain/entities/recipe.dart';
+
+class RecipeDerivedTotals {
+  const RecipeDerivedTotals({
+    required this.kcalPerServ,
+    required this.proteinGPerServ,
+    required this.carbsGPerServ,
+    required this.fatGPerServ,
+    required this.costCentsPerServ,
+    required this.missingNutrition,
+  });
+
+  final double kcalPerServ;
+  final double proteinGPerServ;
+  final double carbsGPerServ;
+  final double fatGPerServ;
+  final int costCentsPerServ;
+  final bool missingNutrition;
+}
+
+class RecipeCalculator {
+  /// Computes per-serving totals from a recipe draft and ingredient catalog.
+  static RecipeDerivedTotals compute({
+    required Recipe recipe,
+    required Map<String, Ingredient> ingredientsById,
+    bool debug = false,
+  }) {
+    if (debug && kDebugMode) {
+      debugPrint('[RecipeCalc] START recipe="${recipe.name}" '
+          'servings=${recipe.servings} items=${recipe.items.length} '
+          'ingCatalog=${ingredientsById.length}');
+    }
+    double totalKcal = 0;
+    double totalProtein = 0;
+    double totalCarbs = 0;
+    double totalFat = 0;
+    int totalCostCents = 0;
+    bool missing = false;
+
+    for (final item in recipe.items) {
+      final ing = ingredientsById[item.ingredientId];
+      if (ing == null) {
+        missing = true;
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]  â€¢ ING MISSING id=${item.ingredientId}');
+        }
+        continue;
+      }
+
+      // Convert item quantity to the ingredient's base unit
+      final qtyInIngUnit = _toIngredientUnit(
+        qty: item.qty,
+        from: item.unit,
+        ing: ing,
+        debug: debug,
+      );
+
+      if (qtyInIngUnit == null) {
+        // Cannot convert (e.g., unsupported/unknown conversion)
+        missing = true;
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]  â€¢ CONVERT FAIL '
+              'id=${item.ingredientId} from=${item.unit} to=${ing.unit}');
+        }
+        continue;
+      }
+
+      if (debug && kDebugMode) {
+        debugPrint('[RecipeCalc]  â€¢ ITEM id=${item.ingredientId} '
+            'name="${ing.name}" qtyRaw=${item.qty} ${item.unit} '
+            'â†’ qtyBase=$qtyInIngUnit ${ing.unit}');
+      }
+
+      // Macros
+      if (ing.unit == Unit.grams || ing.unit == Unit.milliliters) {
+        final per100 = ing.macrosPer100g;
+        final hasAny = per100.kcal > 0 || per100.proteinG > 0 || per100.carbsG > 0 || per100.fatG > 0;
+        if (!hasAny) {
+          missing = true;
+          if (debug && kDebugMode) {
+            debugPrint('[RecipeCalc]    macros: MISSING for "${ing.name}"');
+          }
+        } else {
+          final factor = qtyInIngUnit / 100.0;
+          totalKcal += per100.kcal * factor;
+          totalProtein += per100.proteinG * factor;
+          totalCarbs += per100.carbsG * factor;
+          totalFat += per100.fatG * factor;
+          if (debug && kDebugMode) {
+            final addK = per100.kcal * factor;
+            final addP = per100.proteinG * factor;
+            final addC = per100.carbsG * factor;
+            final addF = per100.fatG * factor;
+            debugPrint('[RecipeCalc]    macros+: kcal=$addK p=$addP c=$addC f=$addF');
+          }
+        }
+      } else if (ing.unit == Unit.piece) {
+        // If piece-based and per-piece macros are available, use them; otherwise, try gramsPerPiece fallback
+        if (ing.nutritionPerPieceKcal != null ||
+            ing.nutritionPerPieceProteinG != null ||
+            ing.nutritionPerPieceCarbsG != null ||
+            ing.nutritionPerPieceFatG != null) {
+          final kcal = ing.nutritionPerPieceKcal ?? 0;
+          final protein = ing.nutritionPerPieceProteinG ?? 0;
+          final carbs = ing.nutritionPerPieceCarbsG ?? 0;
+          final fat = ing.nutritionPerPieceFatG ?? 0;
+          final hasAny = kcal > 0 || protein > 0 || carbs > 0 || fat > 0;
+          if (!hasAny) {
+            missing = true;
+            if (debug && kDebugMode) {
+              debugPrint('[RecipeCalc]    macros: piece but per-piece MISSING');
+            }
+          } else {
+            totalKcal += kcal * qtyInIngUnit;
+            totalProtein += protein * qtyInIngUnit;
+            totalCarbs += carbs * qtyInIngUnit;
+            totalFat += fat * qtyInIngUnit;
+            if (debug && kDebugMode) {
+              debugPrint('[RecipeCalc]    macros+: kcal=${kcal * qtyInIngUnit} '
+                  'p=${protein * qtyInIngUnit} c=${carbs * qtyInIngUnit} '
+                  'f=${fat * qtyInIngUnit}');
+            }
+          }
+        } else if (ing.gramsPerPiece != null) {
+          // Derive per-piece from per-100g using grams-per-piece
+          final grams = qtyInIngUnit * (ing.gramsPerPiece ?? 0);
+          final per100 = ing.macrosPer100g;
+          final hasAny = per100.kcal > 0 || per100.proteinG > 0 || per100.carbsG > 0 || per100.fatG > 0;
+          if (!hasAny) {
+            missing = true;
+            if (debug && kDebugMode) {
+              debugPrint('[RecipeCalc]    macros: per100g MISSING for piece');
+            }
+          } else {
+            final factor = grams / 100.0;
+            totalKcal += per100.kcal * factor;
+            totalProtein += per100.proteinG * factor;
+            totalCarbs += per100.carbsG * factor;
+            totalFat += per100.fatG * factor;
+            if (debug && kDebugMode) {
+              final addK = per100.kcal * factor;
+              final addP = per100.proteinG * factor;
+              final addC = per100.carbsG * factor;
+              final addF = per100.fatG * factor;
+              debugPrint('[RecipeCalc]    macros+: kcal=$addK p=$addP c=$addC f=$addF');
+            }
+          }
+        } else {
+          // No way to compute macros for piece-based item
+          missing = true;
+          if (debug && kDebugMode) {
+            debugPrint('[RecipeCalc]    macros: piece but gramsPerPiece MISSING');
+          }
+        }
+      }
+
+      // Cost: prefer purchase pack if defined, else pricePerUnitCents
+      if (ing.purchasePack.priceCents != null && ing.purchasePack.qty > 0) {
+        // Number of packs to cover requirement (ceil)
+        final requiredPacks = (qtyInIngUnit / ing.purchasePack.qty).ceil();
+        totalCostCents += requiredPacks * (ing.purchasePack.priceCents!);
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]    cost: PACKS packs=$requiredPacks price=${ing.purchasePack.priceCents} '
+              'add=${requiredPacks * (ing.purchasePack.priceCents!)}');
+        }
+      } else {
+        // pricePerUnitCents is per 1 base unit of ing.unit
+        totalCostCents += (qtyInIngUnit * ing.pricePerUnitCents).round();
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]    cost: UNIT ppu=${ing.pricePerUnitCents} '
+              'add=${(qtyInIngUnit * ing.pricePerUnitCents).round()}');
+        }
+      }
+    }
+
+    final servings = recipe.servings > 0 ? recipe.servings.toDouble() : 1.0;
+
+    final result = RecipeDerivedTotals(
+      kcalPerServ: totalKcal / servings,
+      proteinGPerServ: totalProtein / servings,
+      carbsGPerServ: totalCarbs / servings,
+      fatGPerServ: totalFat / servings,
+      costCentsPerServ: (totalCostCents / servings).round(),
+      missingNutrition: missing,
+    );
+
+    if (debug && kDebugMode) {
+      debugPrint('[RecipeCalc] DONE perServ: '
+          'kcal=${result.kcalPerServ} p=${result.proteinGPerServ} '
+          'c=${result.carbsGPerServ} f=${result.fatGPerServ} '
+          'costCents=${result.costCentsPerServ} missing=$missing');
+    }
+    return result;
+  }
+
+  /// Convert `qty` from the editor's item.unit into the ingredient's base unit.
+  /// Returns null if conversion is impossible due to missing density or size.
+  static double? _toIngredientUnit({
+    required double qty,
+    required Unit from,
+    required Ingredient ing,
+    bool debug = false,
+  }) {
+    if (from == ing.unit) return qty;
+
+    // grams <-> ml using density if available, else assume 1.0 (water-like)
+    if ((from == Unit.grams && ing.unit == Unit.milliliters) ||
+        (from == Unit.milliliters && ing.unit == Unit.grams)) {
+      final density = ing.densityGPerMl;
+      if (density == null || density <= 0) return null;
+      final out = (from == Unit.grams) ? qty / density : qty * density;
+      if (debug && kDebugMode) {
+        debugPrint('[RecipeCalc]    convert gâ†”ml density=$density in=$qty from=$from out=$out to=${ing.unit}');
+      }
+      return out;
+    }
+
+    // piece <-> grams/ml using size if available
+    if (from == Unit.piece) {
+      if (ing.unit == Unit.grams) {
+        if (ing.gramsPerPiece == null) return null;
+        final out = qty * ing.gramsPerPiece!;
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]    convert pcsâ†’g gPerPiece=${ing.gramsPerPiece} out=$out');
+        }
+        return out;
+      }
+      if (ing.unit == Unit.milliliters) {
+        if (ing.mlPerPiece == null) return null;
+        final out = qty * ing.mlPerPiece!;
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]    convert pcsâ†’ml mlPerPiece=${ing.mlPerPiece} out=$out');
+        }
+        return out;
+      }
+    }
+
+    // grams/ml -> piece
+    if (ing.unit == Unit.piece) {
+      if (from == Unit.grams && ing.gramsPerPiece != null && ing.gramsPerPiece! > 0) {
+        final out = qty / ing.gramsPerPiece!;
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]    convert gâ†’pcs gPerPiece=${ing.gramsPerPiece} out=$out');
+        }
+        return out;
+      }
+      if (from == Unit.milliliters && ing.mlPerPiece != null && ing.mlPerPiece! > 0) {
+        final out = qty / ing.mlPerPiece!;
+        if (debug && kDebugMode) {
+          debugPrint('[RecipeCalc]    convert mlâ†’pcs mlPerPiece=${ing.mlPerPiece} out=$out');
+        }
+        return out;
+      }
+    }
+
+    return null; // unsupported conversion
+  }
+}

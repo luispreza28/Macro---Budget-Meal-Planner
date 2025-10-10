@@ -6,7 +6,8 @@ import '../../data/repositories/ingredient_repository_impl.dart';
 import '../../data/repositories/recipe_repository_impl.dart';
 // Temporarily disabled due to interface mismatches - will be fixed in Stage 6
 // import '../../data/repositories/user_targets_repository_impl.dart';
-// import '../../data/repositories/pantry_repository_impl.dart';
+import '../../data/repositories/pantry_repository_impl.dart';
+// Use relative import to ensure resolution in all IDE setups
 import '../../data/repositories/plan_repository_impl.dart';
 // import '../../data/repositories/price_override_repository_impl.dart';
 import '../../data/services/data_integrity_service.dart';
@@ -20,6 +21,8 @@ import '../../domain/repositories/user_targets_repository.dart';
 import '../../domain/repositories/pantry_repository.dart';
 import '../../domain/repositories/plan_repository.dart';
 import '../../domain/repositories/price_override_repository.dart';
+import '../../domain/repositories/shopping_list_repository.dart';
+import '../../data/repositories/shopping_list_repository_prefs.dart';
 import '../../data/repositories/user_targets_local_repository.dart';
 
 /// Provider for the app database instance
@@ -50,11 +53,10 @@ final userTargetsRepositoryProvider = Provider<UserTargetsRepository>((ref) {
   return UserTargetsLocalRepository(prefs);
 });
 
-/// Provider for pantry repository - Temporarily disabled due to interface mismatch
+/// Provider for pantry repository backed by Drift storage
 final pantryRepositoryProvider = Provider<PantryRepository>((ref) {
-  throw UnimplementedError(
-    'PantryRepository implementation temporarily disabled - interface mismatch',
-  );
+  final database = ref.watch(databaseProvider);
+  return PantryRepositoryImpl(database);
 });
 
 final localStorageServiceProvider = Provider<LocalStorageService>((ref) {
@@ -112,4 +114,11 @@ final dataIntegrityInitializationProvider = FutureProvider<void>((ref) async {
 final seedDataInitializationProvider = FutureProvider<void>((ref) async {
   final seedDataService = ref.watch(seedDataServiceProvider);
   await seedDataService.initializeSeedData();
+});
+
+/// Provider for ShoppingListRepository backed by SharedPreferences
+final shoppingListRepositoryProvider =
+    Provider<ShoppingListRepository>((ref) {
+  final prefs = ref.watch(sharedPreferencesProvider);
+  return ShoppingListRepositoryPrefs(prefs);
 });

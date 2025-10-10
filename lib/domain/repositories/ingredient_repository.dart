@@ -52,4 +52,14 @@ abstract class IngredientRepository {
 
   /// Watch ingredient by ID (reactive stream)
   Stream<Ingredient?> watchIngredientById(String id);
+
+  /// Upsert minimal nutrition/pricing fields for a given ingredient id
+  Future<void> upsertNutritionAndPrice({
+    required String id,
+    required NutritionPer100 per100,
+    required Unit unit,
+    int? pricePerUnitCents,
+    double packQty = 0,
+    int? packPriceCents,
+  });
 }

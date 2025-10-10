@@ -9,6 +9,7 @@ class MealCard extends StatelessWidget {
     required this.recipe,
     required this.servings,
     required this.onTap,
+    this.onInfoTap,
     this.ingredients = const {}, // optional map for pretty names
     this.isSelected = false,
     this.showMacros = true,
@@ -18,6 +19,7 @@ class MealCard extends StatelessWidget {
   final Recipe recipe;
   final double servings;
   final VoidCallback onTap;
+  final VoidCallback? onInfoTap;
   final bool isSelected;
   final bool showMacros;
 
@@ -79,6 +81,15 @@ class MealCard extends StatelessWidget {
                               ),
                         ),
                       ),
+                    if (onInfoTap != null) ...[
+                      const SizedBox(width: 6),
+                      IconButton(
+                        tooltip: 'Details',
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.info_outline, size: 18),
+                        onPressed: onInfoTap,
+                      ),
+                    ],
                   ],
                 ),
 

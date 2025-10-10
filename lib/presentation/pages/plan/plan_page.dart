@@ -16,10 +16,12 @@ import '../../../domain/entities/user_targets.dart';
 import '../../widgets/plan_widgets/swap_drawer.dart';
 import '../../providers/database_providers.dart';
 import '../../services/export_service.dart';
-import '../../../domain/entities/ingredient.dart';
+import '../../../domain/entities/ingredient.dart' as ing;
 
 // NEW: watch ingredients so we can pass them into WeeklyPlanGrid
 import '../../providers/ingredient_providers.dart';
+import '../../providers/shortfall_providers.dart';
+import '../../providers/database_providers.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -238,6 +240,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
                                 showBudget: targets.budgetCents != null,
+                              ),
+
+                              // Week Shortfalls card
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: _WeekShortfallsCard(),
                               ),
 
                               // Plan grid
@@ -662,5 +670,178 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         ],
       ),
     );
+  }
+}
+
+class _WeekShortfallsCard extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_WeekShortfallsCard> createState() => _WeekShortfallsCardState();
+}
+
+class _WeekShortfallsCardState extends ConsumerState<_WeekShortfallsCard> {
+  bool _adding = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final asyncShortfalls = ref.watch(shortfallForCurrentPlanProvider);
+    return asyncShortfalls.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        // compact: show at most 4 rows, then +N more
+        final maxRows = 4;
+        final more = items.length > maxRows ? items.length - maxRows : 0;
+        final visible = items.take(maxRows).toList();
+
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Week Shortfalls',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const Spacer(),
+                    if (more > 0)
+                      Text('+$more more', style: Theme.of(context).textTheme.labelMedium),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ...visible.map((it) => _WeekShortfallRow(item: it)).toList(),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: _adding
+                        ? null
+                        : () async {
+                            setState(() => _adding = true);
+                            try {
+                              final plan = await ref.read(currentPlanProvider.future);
+                              final repo = ref.read(shoppingListRepositoryProvider);
+                              await repo.addShortfalls(items, planId: plan?.id);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Added ${items.length} items to Shopping List')),
+                              );
+                              ref.invalidate(shoppingListItemsProvider);
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Failed to add: $e')),
+                              );
+                            } finally {
+                              if (mounted) setState(() => _adding = false);
+                            }
+                          },
+                    icon: const Icon(Icons.add_shopping_cart),
+                    label: const Text('Add All to Shopping List'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+import '../../../domain/value/shortfall_item.dart';
+
+class _WeekShortfallRow extends StatelessWidget {
+  const _WeekShortfallRow({required this.item});
+  final ShortfallItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      final name = item.name;
+      final qty = item.missingQty;
+      final unit = item.unit;
+      final aisle = item.aisle;
+      final reason = item.reason;
+
+      final qtyStr = _fmtQty(qty, unit);
+      final aisleStr = _aisleName(aisle);
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text('• $qtyStr • $aisleStr',
+                      style: Theme.of(context).textTheme.labelMedium),
+                  if (reason != null) ...[
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: reason,
+                      child: Icon(Icons.warning_amber_outlined,
+                          size: 16, color: Theme.of(context).colorScheme.tertiary),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+  }
+}
+
+String _fmtQty(double qty, ing.Unit unit) {
+  final rounded = (qty * 10).round() / 10.0;
+  final s = (rounded % 1 == 0) ? rounded.toStringAsFixed(0) : rounded.toStringAsFixed(1);
+  switch (unit) {
+    case ing.Unit.grams:
+      return '$s g';
+    case ing.Unit.milliliters:
+      return '$s ml';
+    case ing.Unit.piece:
+      return '$s pc';
+  }
+}
+
+String _aisleName(ing.Aisle aisle) {
+  switch (aisle) {
+    case ing.Aisle.produce:
+      return 'Produce';
+    case ing.Aisle.meat:
+      return 'Meat';
+    case ing.Aisle.dairy:
+      return 'Dairy';
+    case ing.Aisle.pantry:
+      return 'Pantry';
+    case ing.Aisle.frozen:
+      return 'Frozen';
+    case ing.Aisle.condiments:
+      return 'Condiments';
+    case ing.Aisle.bakery:
+      return 'Bakery';
+    case ing.Aisle.household:
+      return 'Household';
   }
 }

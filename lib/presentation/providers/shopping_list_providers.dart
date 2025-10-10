@@ -6,6 +6,7 @@ import '../providers/database_providers.dart';
 import '../providers/plan_providers.dart';
 import '../providers/recipe_providers.dart';
 import '../providers/ingredient_providers.dart';
+import 'dart:convert';
 
 class AggregatedShoppingItem {
   AggregatedShoppingItem({
@@ -60,7 +61,8 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
 
   final recipeById = {for (final r in recipes) r.id: r};
   final ingredientById = {for (final i in ingredients) i.id: i};
-  final Map<String, double> totalsByIngredientId = {};
+  // Aggregate by ingredient + unit to support separate lines for different units.
+  final Map<String, Map<ing.Unit, double>> totals = {};
 
   for (final day in plan.days) {
     for (final meal in day.meals) {
@@ -71,52 +73,62 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
         final ingMeta = ingredientById[item.ingredientId];
         if (ingMeta == null) continue;
 
-        final double qtyInBase = _toIngredientUnit(
+        // Convert plan-derived items into ingredient base unit for consistency.
+        final qtyInBase = _toIngredientUnit(
           qty: item.qty * meal.servings,
           from: item.unit,
           to: ingMeta.unit,
         );
 
-        totalsByIngredientId.update(
-          item.ingredientId,
-          (v) => v + qtyInBase,
-          ifAbsent: () => qtyInBase,
-        );
+        final byUnit = totals.putIfAbsent(item.ingredientId, () => {});
+        byUnit.update(ingMeta.unit, (v) => v + qtyInBase,
+            ifAbsent: () => qtyInBase);
       }
     }
   }
 
-  if (totalsByIngredientId.isEmpty) {
+  // Merge in user-added extras (e.g., shortfalls) persisted per-plan.
+  final extras = await _loadExtrasForPlan(ref, plan.id);
+  for (final e in extras) {
+    final byUnit = totals.putIfAbsent(e.ingredientId, () => {});
+    byUnit.update(e.unit, (v) => v + e.qty, ifAbsent: () => e.qty);
+  }
+
+  if (totals.isEmpty) {
     return const [];
   }
 
   final List<AggregatedShoppingItem> flat = [];
-  totalsByIngredientId.forEach((id, totalQty) {
+  totals.forEach((id, byUnit) {
     final ingMeta = ingredientById[id];
-    if (ingMeta == null) return;
+    if (byUnit.isEmpty || ingMeta == null) return;
 
-    int estimatedCostCents;
+    byUnit.forEach((unit, totalQty) {
+      int estimatedCostCents = 0;
+      int? packs;
 
-    final packPrice = ingMeta.purchasePack.priceCents;
-    final packQty = ingMeta.purchasePack.qty;
+      // Only compute pack/cost if the unit matches the ingredient base unit.
+      if (unit == ingMeta.unit) {
+        final packPrice = ingMeta.purchasePack.priceCents;
+        final packQty = ingMeta.purchasePack.qty;
+        if (packPrice != null && packQty > 0) {
+          packs = (totalQty / packQty).ceil();
+          estimatedCostCents = packs * packPrice;
+        } else {
+          estimatedCostCents = (totalQty * ingMeta.pricePerUnitCents).round();
+        }
+      }
 
-    int? packs;
-    if (packPrice != null && packQty > 0) {
-      packs = (totalQty / packQty).ceil();
-      estimatedCostCents = packs * packPrice;
-    } else {
-      estimatedCostCents = (totalQty * ingMeta.pricePerUnitCents).round();
-    }
-
-    flat.add(
-      AggregatedShoppingItem(
-        ingredient: ingMeta,
-        totalQty: totalQty,
-        unit: ingMeta.unit,
-        estimatedCostCents: estimatedCostCents,
-        packsNeeded: packs,
-      ),
-    );
+      flat.add(
+        AggregatedShoppingItem(
+          ingredient: ingMeta,
+          totalQty: totalQty,
+          unit: unit,
+          estimatedCostCents: estimatedCostCents,
+          packsNeeded: packs,
+        ),
+      );
+    });
   });
 
   if (flat.isEmpty) {
@@ -169,6 +181,38 @@ double _toIngredientUnit({
   }
 
   return qty;
+}
+
+// ---------- Extras (persisted Shortfalls) ----------
+
+class _Extra {
+  _Extra({required this.ingredientId, required this.unit, required this.qty});
+  final String ingredientId;
+  final ing.Unit unit;
+  final double qty;
+}
+
+Future<List<_Extra>> _loadExtrasForPlan(Ref ref, String planId) async {
+  final prefs = ref.read(sharedPreferencesProvider);
+  final key = 'shopping_extras_${planId}';
+  final raw = prefs.getString(key);
+  if (raw == null || raw.isEmpty) return const [];
+  try {
+    final list = jsonDecode(raw) as List<dynamic>;
+    return list.map((e) {
+      final m = e as Map<String, dynamic>;
+      return _Extra(
+        ingredientId: m['ingredientId'] as String,
+        unit: ing.Unit.values.firstWhere(
+          (u) => u.name == (m['unit'] as String),
+          orElse: () => ing.Unit.grams,
+        ),
+        qty: (m['qty'] as num).toDouble(),
+      );
+    }).toList();
+  } catch (_) {
+    return const [];
+  }
 }
 
 final shoppingListDebugProvider = FutureProvider<String>((ref) async {

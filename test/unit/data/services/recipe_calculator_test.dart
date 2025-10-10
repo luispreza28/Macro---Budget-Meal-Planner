@@ -1,0 +1,242 @@
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:macro_budget_meal_planner/data/services/recipe_calculator.dart';
+import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart';
+import 'package:macro_budget_meal_planner/domain/entities/recipe.dart';
+
+void main() {
+  group('RecipeCalculator.compute', () {
+    test('same-unit grams computes macros and cost per serving', () {
+      const chicken = Ingredient(
+        id: 'chicken',
+        name: 'Chicken breast',
+        unit: Unit.grams,
+        macrosPer100g: MacrosPerHundred(kcal: 165, proteinG: 31, carbsG: 0, fatG: 3.6),
+        pricePerUnitCents: 2, // 2 cents per gram
+        purchasePack: PurchasePack(qty: 1000, unit: Unit.grams, priceCents: 2000),
+        aisle: Aisle.meat,
+        tags: ['protein'],
+        source: IngredientSource.manual,
+      );
+      const rice = Ingredient(
+        id: 'rice',
+        name: 'Rice',
+        unit: Unit.grams,
+        macrosPer100g: MacrosPerHundred(kcal: 360, proteinG: 7, carbsG: 79, fatG: 0.6),
+        pricePerUnitCents: 1, // 1 cent per gram
+        purchasePack: PurchasePack(qty: 1000, unit: Unit.grams, priceCents: 1000),
+        aisle: Aisle.pantry,
+        tags: ['carb'],
+        source: IngredientSource.manual,
+      );
+
+      final recipe = Recipe(
+        id: 'r1',
+        name: 'Chicken Rice',
+        servings: 2,
+        timeMins: 20,
+        cuisine: null,
+        dietFlags: const [],
+        items: const [
+          RecipeItem(ingredientId: 'chicken', qty: 200, unit: Unit.grams),
+          RecipeItem(ingredientId: 'rice', qty: 150, unit: Unit.grams),
+        ],
+        steps: const [],
+        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        costPerServCents: 0,
+        source: RecipeSource.manual,
+      );
+
+      final res = RecipeCalculator.compute(
+        recipe: recipe,
+        ingredientsById: {'chicken': chicken, 'rice': rice},
+      );
+
+      expect(res.missingNutrition, isFalse);
+      // macros
+      expect(res.kcalPerServ, closeTo(((165*2.0)+(360*1.5))/2.0, 0.01));
+      expect(res.proteinGPerServ, closeTo(((31*2.0)+(7*1.5))/2.0, 0.01));
+      expect(res.carbsGPerServ, closeTo(((0*2.0)+(79*1.5))/2.0, 0.01));
+      expect(res.fatGPerServ, closeTo(((3.6*2.0)+(0.6*1.5))/2.0, 0.01));
+      // cost: 200g*2 + 150g*1 = 550 cents total -> per serv 275
+      expect(res.costCentsPerServ, 275);
+    });
+
+    test('ml with density and macros per 100ml-equivalent', () {
+      final oil = const Ingredient(
+        id: 'oil',
+        name: 'Oil',
+        unit: Unit.milliliters,
+        macrosPer100g: MacrosPerHundred(kcal: 884, proteinG: 0, carbsG: 0, fatG: 100),
+        pricePerUnitCents: 1, // 1 cent per ml
+        purchasePack: PurchasePack(qty: 500, unit: Unit.milliliters, priceCents: 500),
+        aisle: Aisle.condiments,
+        tags: ['fat'],
+        source: IngredientSource.manual,
+      ).copyWith(densityGPerMl: () => 0.91);
+
+      final recipe = Recipe(
+        id: 'r2',
+        name: 'Oil Shot',
+        servings: 1,
+        timeMins: 1,
+        cuisine: null,
+        dietFlags: const [],
+        items: const [RecipeItem(ingredientId: 'oil', qty: 15, unit: Unit.milliliters)],
+        steps: const [],
+        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        costPerServCents: 0,
+        source: RecipeSource.manual,
+      );
+
+      final res = RecipeCalculator.compute(recipe: recipe, ingredientsById: {'oil': oil});
+
+      // Using per-100g macros with 0.91 g/ml density, 15 ml ~ 13.65 g -> factor ~ 0.1365
+      expect(res.kcalPerServ, closeTo(884 * (13.65 / 100.0), 0.5));
+      expect(res.fatGPerServ, closeTo(100 * (13.65 / 100.0), 0.5));
+      expect(res.costCentsPerServ, 15);
+      expect(res.missingNutrition, isFalse);
+    });
+
+    test('piece with gramsPerPiece fallback to per-100g', () {
+      final banana = const Ingredient(
+        id: 'banana',
+        name: 'Banana',
+        unit: Unit.piece,
+        macrosPer100g: MacrosPerHundred(kcal: 89, proteinG: 1.1, carbsG: 23, fatG: 0.3),
+        pricePerUnitCents: 30,
+        purchasePack: PurchasePack(qty: 1, unit: Unit.piece, priceCents: 30),
+        aisle: Aisle.produce,
+        tags: ['fruit'],
+        source: IngredientSource.manual,
+      ).copyWith(gramsPerPiece: () => 120);
+
+      final recipe = Recipe(
+        id: 'r3',
+        name: 'Banana Snack',
+        servings: 1,
+        timeMins: 1,
+        cuisine: null,
+        dietFlags: const [],
+        items: const [RecipeItem(ingredientId: 'banana', qty: 1, unit: Unit.piece)],
+        steps: const [],
+        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        costPerServCents: 0,
+        source: RecipeSource.manual,
+      );
+
+      final res = RecipeCalculator.compute(recipe: recipe, ingredientsById: {'banana': banana});
+
+      // 120g -> factor 1.2
+      expect(res.kcalPerServ, closeTo(89 * 1.2, 0.01));
+      expect(res.carbsGPerServ, closeTo(23 * 1.2, 0.01));
+      expect(res.costCentsPerServ, 30);
+      expect(res.missingNutrition, isFalse);
+    });
+
+    test('purchasePack vs pricePerUnitCents', () {
+      const spice = Ingredient(
+        id: 'spice',
+        name: 'Spice',
+        unit: Unit.grams,
+        macrosPer100g: MacrosPerHundred(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        pricePerUnitCents: 0,
+        purchasePack: PurchasePack(qty: 50, unit: Unit.grams, priceCents: 299),
+        aisle: Aisle.pantry,
+        tags: [],
+        source: IngredientSource.manual,
+      );
+      const sugar = Ingredient(
+        id: 'sugar',
+        name: 'Sugar',
+        unit: Unit.grams,
+        macrosPer100g: MacrosPerHundred(kcal: 387, proteinG: 0, carbsG: 100, fatG: 0),
+        pricePerUnitCents: 1, // 1 cent per gram
+        purchasePack: PurchasePack(qty: 0, unit: Unit.grams, priceCents: null),
+        aisle: Aisle.pantry,
+        tags: [],
+        source: IngredientSource.manual,
+      );
+
+      final recipe = Recipe(
+        id: 'r4',
+        name: 'Mix',
+        servings: 1,
+        timeMins: 1,
+        cuisine: null,
+        dietFlags: const [],
+        items: const [
+          RecipeItem(ingredientId: 'spice', qty: 60, unit: Unit.grams), // needs 2 packs (50g each)
+          RecipeItem(ingredientId: 'sugar', qty: 10, unit: Unit.grams), // price per unit path
+        ],
+        steps: const [],
+        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        costPerServCents: 0,
+        source: RecipeSource.manual,
+      );
+
+      final res = RecipeCalculator.compute(
+        recipe: recipe,
+        ingredientsById: const {'spice': spice, 'sugar': sugar},
+      );
+
+      // spice: ceil(60/50)=2 packs -> 2*299=598; sugar: 10*1=10 -> total 608
+      expect(res.costCentsPerServ, 608);
+    });
+
+    test('missing nutrition and missing density are flagged', () {
+      // Missing nutrition (all zeros) for grams-based ingredient
+      const water = Ingredient(
+        id: 'water',
+        name: 'Water',
+        unit: Unit.milliliters,
+        macrosPer100g: MacrosPerHundred(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        pricePerUnitCents: 0,
+        purchasePack: PurchasePack(qty: 1000, unit: Unit.milliliters, priceCents: 0),
+        aisle: Aisle.pantry,
+        tags: [],
+        source: IngredientSource.manual,
+      );
+      // Require grams->ml conversion with invalid density -> conversion fails
+      final milk = const Ingredient(
+        id: 'milk',
+        name: 'Milk',
+        unit: Unit.milliliters,
+        macrosPer100g: MacrosPerHundred(kcal: 42, proteinG: 3.4, carbsG: 5, fatG: 1),
+        pricePerUnitCents: 0,
+        purchasePack: PurchasePack(qty: 1000, unit: Unit.milliliters, priceCents: 100),
+        aisle: Aisle.dairy,
+        tags: [],
+        source: IngredientSource.manual,
+      ).copyWith(densityGPerMl: () => 0.0);
+
+      final recipe = Recipe(
+        id: 'r5',
+        name: 'Test',
+        servings: 1,
+        timeMins: 1,
+        cuisine: null,
+        dietFlags: const [],
+        items: const [
+          RecipeItem(ingredientId: 'water', qty: 100, unit: Unit.milliliters),
+          RecipeItem(ingredientId: 'milk', qty: 100, unit: Unit.grams), // grams -> ml with invalid density
+        ],
+        steps: const [],
+        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        costPerServCents: 0,
+        source: RecipeSource.manual,
+      );
+
+      final res = RecipeCalculator.compute(
+        recipe: recipe,
+        ingredientsById: {'water': water, 'milk': milk},
+      );
+
+      expect(res.missingNutrition, isTrue);
+      // water contributes 0 macros; milk conversion fails so skipped -> totals 0
+      expect(res.kcalPerServ, 0);
+      expect(res.proteinGPerServ, 0);
+    });
+  });
+}
+

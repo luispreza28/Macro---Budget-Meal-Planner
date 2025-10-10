@@ -39,6 +39,14 @@ class RecipeItem extends Equatable {
 
   Map<String, dynamic> toJson() => _$RecipeItemToJson(this);
 
+  RecipeItem copyWith({String? ingredientId, double? qty, Unit? unit}) {
+    return RecipeItem(
+      ingredientId: ingredientId ?? this.ingredientId,
+      qty: qty ?? this.qty,
+      unit: unit ?? this.unit,
+    );
+  }
+
   @override
   List<Object?> get props => [ingredientId, qty, unit];
 }
@@ -70,6 +78,20 @@ class MacrosPerServing extends Equatable {
       proteinG: proteinG * servings,
       carbsG: carbsG * servings,
       fatG: fatG * servings,
+    );
+  }
+
+  MacrosPerServing copyWith({
+    double? kcal,
+    double? proteinG,
+    double? carbsG,
+    double? fatG,
+  }) {
+    return MacrosPerServing(
+      kcal: kcal ?? this.kcal,
+      proteinG: proteinG ?? this.proteinG,
+      carbsG: carbsG ?? this.carbsG,
+      fatG: fatG ?? this.fatG,
     );
   }
 
@@ -147,8 +169,7 @@ class Recipe extends Equatable {
   /// Data source for tracking recipe origin
   final RecipeSource source;
 
-  factory Recipe.fromJson(Map<String, dynamic> json) =>
-      _$RecipeFromJson(json);
+  factory Recipe.fromJson(Map<String, dynamic> json) => _$RecipeFromJson(json);
 
   Map<String, dynamic> toJson() => _$RecipeToJson(this);
 
@@ -195,8 +216,8 @@ class Recipe extends Equatable {
 
   /// Check if recipe is high volume (good for cutting)
   bool isHighVolume() {
-    return hasTag('high_volume') || 
-           dietFlags.any((flag) => ['salad', 'soup', 'vegetables'].contains(flag));
+    return hasTag('high_volume') ||
+        dietFlags.any((flag) => ['salad', 'soup', 'vegetables'].contains(flag));
   }
 
   /// Check if recipe is calorie dense (good for bulking)
@@ -240,16 +261,16 @@ class Recipe extends Equatable {
 
   @override
   List<Object?> get props => [
-        id,
-        name,
-        servings,
-        timeMins,
-        cuisine,
-        dietFlags,
-        items,
-        steps,
-        macrosPerServ,
-        costPerServCents,
-        source,
-      ];
+    id,
+    name,
+    servings,
+    timeMins,
+    cuisine,
+    dietFlags,
+    items,
+    steps,
+    macrosPerServ,
+    costPerServCents,
+    source,
+  ];
 }

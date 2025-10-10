@@ -23,10 +23,10 @@ Map<String, dynamic> _$MacrosPerHundredToJson(MacrosPerHundred instance) =>
     };
 
 PurchasePack _$PurchasePackFromJson(Map<String, dynamic> json) => PurchasePack(
-  qty: (json['qty'] as num).toDouble(),
-  unit: $enumDecode(_$UnitEnumMap, json['unit']),
-  priceCents: (json['priceCents'] as num?)?.toInt(),
-);
+      qty: (json['qty'] as num).toDouble(),
+      unit: $enumDecode(_$UnitEnumMap, json['unit']),
+      priceCents: (json['priceCents'] as num?)?.toInt(),
+    );
 
 Map<String, dynamic> _$PurchasePackToJson(PurchasePack instance) =>
     <String, dynamic>{
@@ -42,23 +42,39 @@ const _$UnitEnumMap = {
 };
 
 Ingredient _$IngredientFromJson(Map<String, dynamic> json) => Ingredient(
-  id: json['id'] as String,
-  name: json['name'] as String,
-  unit: $enumDecode(_$UnitEnumMap, json['unit']),
-  macrosPer100g: MacrosPerHundred.fromJson(
-    json['macrosPer100g'] as Map<String, dynamic>,
-  ),
-  pricePerUnitCents: (json['pricePerUnitCents'] as num).toInt(),
-  purchasePack: PurchasePack.fromJson(
-    json['purchasePack'] as Map<String, dynamic>,
-  ),
-  aisle: $enumDecode(_$AisleEnumMap, json['aisle']),
-  tags: (json['tags'] as List<dynamic>).map((e) => e as String).toList(),
-  source: $enumDecode(_$IngredientSourceEnumMap, json['source']),
-  lastVerifiedAt: json['lastVerifiedAt'] == null
-      ? null
-      : DateTime.parse(json['lastVerifiedAt'] as String),
-);
+      id: json['id'] as String,
+      name: json['name'] as String,
+      unit: $enumDecode(_$UnitEnumMap, json['unit']),
+      macrosPer100g: MacrosPerHundred.fromJson(
+        json['macrosPer100g'] as Map<String, dynamic>,
+      ),
+      pricePerUnitCents: (json['pricePerUnitCents'] as num).toInt(),
+      purchasePack: PurchasePack.fromJson(
+        json['purchasePack'] as Map<String, dynamic>,
+      ),
+      aisle: $enumDecode(_$AisleEnumMap, json['aisle']),
+      tags: (json['tags'] as List<dynamic>).map((e) => e as String).toList(),
+      source: $enumDecode(_$IngredientSourceEnumMap, json['source']),
+      lastVerifiedAt: json['lastVerifiedAt'] == null
+          ? null
+          : DateTime.parse(json['lastVerifiedAt'] as String),
+      nutritionPer100gKcal:
+          (json['nutritionPer100gKcal'] as num?)?.toDouble(),
+      nutritionPer100gProteinG:
+          (json['nutritionPer100gProteinG'] as num?)?.toDouble(),
+      nutritionPer100gCarbsG:
+          (json['nutritionPer100gCarbsG'] as num?)?.toDouble(),
+      nutritionPer100gFatG:
+          (json['nutritionPer100gFatG'] as num?)?.toDouble(),
+      nutritionPerPieceKcal:
+          (json['nutritionPerPieceKcal'] as num?)?.toDouble(),
+      nutritionPerPieceProteinG:
+          (json['nutritionPerPieceProteinG'] as num?)?.toDouble(),
+      nutritionPerPieceCarbsG:
+          (json['nutritionPerPieceCarbsG'] as num?)?.toDouble(),
+      nutritionPerPieceFatG:
+          (json['nutritionPerPieceFatG'] as num?)?.toDouble(),
+    );
 
 Map<String, dynamic> _$IngredientToJson(Ingredient instance) =>
     <String, dynamic>{
@@ -72,6 +88,14 @@ Map<String, dynamic> _$IngredientToJson(Ingredient instance) =>
       'tags': instance.tags,
       'source': _$IngredientSourceEnumMap[instance.source]!,
       'lastVerifiedAt': instance.lastVerifiedAt?.toIso8601String(),
+      'nutritionPer100gKcal': instance.nutritionPer100gKcal,
+      'nutritionPer100gProteinG': instance.nutritionPer100gProteinG,
+      'nutritionPer100gCarbsG': instance.nutritionPer100gCarbsG,
+      'nutritionPer100gFatG': instance.nutritionPer100gFatG,
+      'nutritionPerPieceKcal': instance.nutritionPerPieceKcal,
+      'nutritionPerPieceProteinG': instance.nutritionPerPieceProteinG,
+      'nutritionPerPieceCarbsG': instance.nutritionPerPieceCarbsG,
+      'nutritionPerPieceFatG': instance.nutritionPerPieceFatG,
     };
 
 const _$AisleEnumMap = {

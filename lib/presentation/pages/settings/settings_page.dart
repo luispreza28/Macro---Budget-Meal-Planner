@@ -7,6 +7,10 @@ import '../../providers/billing_providers.dart';
 import '../../../data/services/billing_service.dart';
 import '../../router/app_router.dart';
 import '../../widgets/paywall_widget.dart';
+import '../../providers/ingredient_providers.dart';
+import '../../providers/recipe_providers.dart';
+import '../../providers/database_providers.dart';
+import '../../../domain/entities/ingredient.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -58,6 +62,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             loading: () => const _LoadingSection(),
             error: (error, stack) => _ErrorSection(error: error.toString() ),
             data: (targets) => _UserProfileSection(targets: targets),
+          ),
+
+          const SizedBox(height: 16),
+
+          // DEV utilities
+          _buildSectionHeader('DEV'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: FilledButton.icon(
+              icon: const Icon(Icons.science),
+              label: const Text('Patch sample ingredient nutrition/prices'),
+              onPressed: _seedSampleNutrition,
+            ),
           ),
 
           const SizedBox(height: 16),
@@ -273,6 +290,61 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _seedSampleNutrition() async {
+    final repo = ref.read(ingredientRepositoryProvider);
+    try {
+      await repo.upsertNutritionAndPrice(
+        id: 'ing_chicken_breast_raw',
+        unit: Unit.grams,
+        per100: const NutritionPer100(kcal: 165, proteinG: 31, carbsG: 0, fatG: 3.6),
+        pricePerUnitCents: 1,
+        packQty: 1000,
+        packPriceCents: 1000,
+      );
+
+      await repo.upsertNutritionAndPrice(
+        id: 'ing_rice_cooked',
+        unit: Unit.grams,
+        per100: const NutritionPer100(kcal: 130, proteinG: 2.7, carbsG: 28, fatG: 0.3),
+        pricePerUnitCents: 0,
+        packQty: 2000,
+        packPriceCents: 400,
+      );
+
+      await repo.upsertNutritionAndPrice(
+        id: 'ing_olive_oil',
+        unit: Unit.grams,
+        per100: const NutritionPer100(kcal: 884, proteinG: 0, carbsG: 0, fatG: 100),
+        packQty: 500,
+        packPriceCents: 700,
+      );
+
+      await repo.upsertNutritionAndPrice(
+        id: 'ing_salt_pepper',
+        unit: Unit.grams,
+        per100: const NutritionPer100(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
+        packQty: 100,
+        packPriceCents: 200,
+      );
+
+      // Invalidate providers so UI refreshes
+      ref.invalidate(allIngredientsProvider);
+      ref.invalidate(allRecipesProvider);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sample nutrition seeded')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to seed: $e')),
+        );
+      }
+    }
   }
 
   Widget _buildSectionHeader(String title) {

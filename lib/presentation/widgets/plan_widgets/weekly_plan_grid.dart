@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../domain/entities/plan.dart';
 import '../../../domain/entities/recipe.dart';
@@ -206,6 +207,7 @@ class _MealsRow extends StatelessWidget {
                     onTap: () => onMealTap(mealIndex),
                     isSelected: isSelected,
                     ingredientNameById: ingredientNameById,
+                    onInfoTap: () => context.push('/recipe/${recipe.id}'),
                   ),
                 ),
               ],

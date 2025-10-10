@@ -8,6 +8,7 @@ import '../pages/plan/plan_page.dart';
 import '../pages/shopping/shopping_list_page.dart';
 import '../pages/pantry/pantry_page.dart';
 import '../pages/settings/settings_page.dart';
+import '../pages/recipes/recipe_details_page.dart';
 
 /// Provider for the app router configuration
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -22,6 +23,7 @@ class AppRouter {
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
   static const String settings = '/settings';
+  static const String recipeDetails = '/recipe/:id';
 
   static final GoRouter router = GoRouter(
     initialLocation: onboarding, // Start with onboarding for new users
@@ -73,6 +75,16 @@ class AppRouter {
         pageBuilder: (context, state) => MaterialPage<void>(
           key: state.pageKey,
           child: const SettingsPage(),
+        ),
+      ),
+      GoRoute(
+        path: recipeDetails,
+        name: 'recipe-details',
+        pageBuilder: (context, state) => MaterialPage<void>(
+          key: state.pageKey,
+          child: RecipeDetailsPage(
+            recipeId: state.pathParameters['id']!,
+          ),
         ),
       ),
     ],
