@@ -1,0 +1,270 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../providers/plan_providers.dart';
+import '../../providers/recipe_providers.dart';
+import '../../providers/user_targets_providers.dart';
+import '../../router/app_router.dart';
+import '../../widgets/plan_widgets/totals_bar.dart';
+import '../../widgets/plan_widgets/weekly_plan_grid.dart';
+import '../../../domain/entities/recipe.dart';
+import '../../../domain/entities/plan.dart';
+import '../../../domain/entities/user_targets.dart';
+import '../../widgets/plan_widgets/swap_drawer.dart';
+import '../../providers/database_providers.dart';
+import '../../services/export_service.dart';
+import '../../../domain/entities/ingredient.dart' as ing;
+
+// NEW: watch ingredients so we can pass them into WeeklyPlanGrid
+import '../../providers/ingredient_providers.dart';
+import '../../providers/shortfall_providers.dart';
+import '../../providers/database_providers.dart';
+import '../../providers/budget_providers.dart';
+
+/// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
+class PlanPage extends ConsumerStatefulWidget {
+  const PlanPage({super.key});
+
+  @override
+  ConsumerState<PlanPage> createState() => _PlanPageState();
+}
+
+class _PlanPageState extends ConsumerState<PlanPage> {
+  int? selectedMealIndex;
+  bool isSwapDrawerOpen = false;
+
+  PlanTotals _recomputeTotals({
+    required Plan plan,
+    required Map<String, Recipe> recipeMap,
+  }) {
+    double kcal = 0;
+    double protein = 0;
+    double carbs = 0;
+    double fat = 0;
+    int costCents = 0;
+
+    for (final day in plan.days) {
+      for (final meal in day.meals) {
+        final recipe = recipeMap[meal.recipeId];
+        if (recipe == null) continue;
+
+        final servings = meal.servings;
+        kcal += recipe.macrosPerServ.kcal * servings;
+        protein += recipe.macrosPerServ.proteinG * servings;
+        carbs += recipe.macrosPerServ.carbsG * servings;
+        fat += recipe.macrosPerServ.fatG * servings;
+        costCents += (recipe.costPerServCents * servings).round();
+      }
+    }
+
+    return PlanTotals(
+      kcal: kcal,
+      proteinG: protein,
+      carbsG: carbs,
+      fatG: fat,
+      costCents: costCents,
+    );
+  }
+
+  Plan _planWithSwappedMeal({
+    required Plan plan,
+    required int dayIndex,
+    required int mealIndex,
+    required String newRecipeId,
+    required Map<String, Recipe> recipeMap,
+  }) {
+    final newDays = plan.days.asMap().entries.map((entry) {
+      final index = entry.key;
+      final day = entry.value;
+
+      if (index != dayIndex) {
+        return day;
+      }
+
+      final newMeals = day.meals.asMap().entries.map((mealEntry) {
+        final currentMealIndex = mealEntry.key;
+        final meal = mealEntry.value;
+
+        if (currentMealIndex != mealIndex) {
+          return meal;
+        }
+
+        return meal.copyWith(recipeId: newRecipeId);
+      }).toList();
+
+      return day.copyWith(meals: newMeals);
+    }).toList();
+
+    final tempPlan = plan.copyWith(days: newDays);
+    final newTotals = _recomputeTotals(plan: tempPlan, recipeMap: recipeMap);
+
+    return tempPlan.copyWith(totals: newTotals);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentPlanAsync = ref.watch(currentPlanProvider);
+    final userTargetsAsync = ref.watch(currentUserTargetsProvider);
+    final recipesAsync = ref.watch(allRecipesProvider);
+    final ingredientsAsync = ref.watch(allIngredientsProvider); // <— NEW
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Weekly Plan'),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: Navigator.of(context).canPop()
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => context.pop(),
+              )
+            : null,
+        actions: [
+          IconButton(
+            onPressed: () => context.go(AppRouter.shoppingList),
+            icon: const Icon(Icons.shopping_cart_outlined),
+            tooltip: 'Shopping List',
+          ),
+          IconButton(
+            onPressed: () async {
+              await _generateNewPlan();
+            },
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Generate New Plan',
+          ),
+          PopupMenuButton(
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.settings),
+                    SizedBox(width: 8),
+                    Text('Settings'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'export',
+                child: Row(
+                  children: [
+                    Icon(Icons.share),
+                    SizedBox(width: 8),
+                    Text('Export Plan'),
+                  ],
+                ),
+              ),
+            ],
+            onSelected: (value) {
+              switch (value) {
+                case 'settings':
+                  context.go(AppRouter.settings);
+                  break;
+                case 'export':
+                  final plan = currentPlanAsync.asData?.value;
+                  final recipes = recipesAsync.asData?.value;
+                  final ingredients = ingredientsAsync.asData?.value;
+
+                  if (plan == null || recipes == null || ingredients == null) {
+                    if (!mounted) {
+                      return;
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Plan data still loading. Try again.'),
+                      ),
+                    );
+                    break;
+                  }
+
+                  final recipeMap = {
+                    for (final recipe in recipes) recipe.id: recipe,
+                  };
+                  final ingredientMap = {
+                    for (final ingredient in ingredients)
+                      ingredient.id: ingredient,
+                  };
+
+                  _showExportChooser(plan, recipeMap, ingredientMap);
+                  break;
+              }
+            },
+          ),
+        ],
+      ),
+      body: userTargetsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) => _buildErrorState(error.toString()),
+        data: (targets) {
+          if (targets == null) {
+            return _buildNoTargetsState();
+          }
+
+          return currentPlanAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, stack) => _buildErrorState(error.toString()),
+            data: (plan) {
+              if (plan == null) {
+                return _buildNoPlanState();
+              }
+
+              return recipesAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stack) => _buildErrorState(error.toString()),
+                data: (recipes) {
+                  // Wait for ingredients too
+                  return ingredientsAsync.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, stack) => _buildErrorState(error.toString()),
+                    data: (ingredients) {
+                      final recipeMap = {for (var r in recipes) r.id: r};
+                      final ingredientMap = {
+                        for (var i in ingredients) i.id: i,
+                      };
+
+                      return Stack(
+                        children: [
+                          Column(
+                            children: [
+                              // Totals bar
+                              TotalsBar(
+                                targets: targets,
+                                actualKcal:
+                                    plan.totals.kcal / 7, // Daily average
+                                actualProteinG: plan.totals.proteinG / 7,
+                                actualCarbsG: plan.totals.carbsG / 7,
+                                actualFatG: plan.totals.fatG / 7,
+                                actualCostCents: (plan.totals.costCents / 7)
+                                    .round(),
+                                showBudget: targets.budgetCents != null,
+                              ),
+
+                              // Budget header (weekly)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                child: _BudgetHeader(onGenerateCheaper: _generateCheaperPlan),
+                              ),
+
+                              // Week Shortfalls card
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: _WeekShortfallsCard(),
+                              ),
+
+                              // Plan grid
+                              Expanded(
+                                child: WeeklyPlanGrid(
+                                  plan: plan,
+                                  recipes: recipeMap,
+                                  ingredients:
+                                      ingredientMap, // <— NEW required param
+                                  selectedMealIndex: selectedMealIndex,
+                                  onMealTap: (dayIndex, mealIndex) {
+                                    _handleMealTap(
+                                      dayIndex,
+                                      mealIndex,
+                                      plan,

@@ -54,7 +54,7 @@ class MealCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Title + servings chip
+                // Title + servings chip + cost/serv chip
                 Row(
                   children: [
                     Expanded(
@@ -81,6 +81,22 @@ class MealCard extends StatelessWidget {
                               ),
                         ),
                       ),
+                    if (recipe.costPerServCents > 0) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '\$${(recipe.costPerServCents / 100).toStringAsFixed(2)} / serv',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ),
+                    ],
                     if (onInfoTap != null) ...[
                       const SizedBox(width: 6),
                       IconButton(

@@ -17,11 +17,14 @@ import '../../widgets/plan_widgets/swap_drawer.dart';
 import '../../providers/database_providers.dart';
 import '../../services/export_service.dart';
 import '../../../domain/entities/ingredient.dart' as ing;
+import '../../../domain/value/shortfall_item.dart';
 
 // NEW: watch ingredients so we can pass them into WeeklyPlanGrid
 import '../../providers/ingredient_providers.dart';
 import '../../providers/shortfall_providers.dart';
 import '../../providers/database_providers.dart';
+import '../../providers/budget_providers.dart';
+import '../../providers/shopping_list_providers.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -240,6 +243,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
                                 showBudget: targets.budgetCents != null,
+                              ),
+
+                              // Budget header (weekly)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                child: _BudgetHeader(onGenerateCheaper: _generateCheaperPlan),
                               ),
 
                               // Week Shortfalls card
@@ -616,7 +625,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
   void _showExportChooser(
     Plan plan,
     Map<String, Recipe> recipeMap,
-    Map<String, Ingredient> ingredientMap,
+    Map<String, ing.Ingredient> ingredientMap,
   ) {
     showDialog(
       context: context,
@@ -753,9 +762,235 @@ class _WeekShortfallsCardState extends ConsumerState<_WeekShortfallsCard> {
       },
     );
   }
+
+  /// Generate a new plan with a bias toward cheaper recipes.
+  Future<void> _generateCheaperPlan() async {
+    try {
+      final recipes = await ref.read(allRecipesProvider.future);
+      final targets = await ref.read(currentUserTargetsProvider.future);
+      final ingredients = await ref.read(allIngredientsProvider.future);
+
+      if (targets == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please complete setup first')),
+        );
+        return;
+      }
+
+      final generator = ref.read(planGenerationServiceProvider);
+      final plan = await generator.generate(
+        targets: targets,
+        recipes: recipes,
+        ingredients: ingredients,
+        costBias: 0.9, // Strong nudge toward cheaper options
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.savePlan(plan);
+      await notifier.setCurrentPlan(plan.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cheaper plan generated')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
+    }
+  }
 }
 
-import '../../../domain/value/shortfall_item.dart';
+class _BudgetHeader extends ConsumerWidget {
+  const _BudgetHeader({required this.onGenerateCheaper});
+  final Future<void> Function() onGenerateCheaper;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final budgetAsync = ref.watch(budgetStatusProvider);
+
+    return budgetAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
+      data: (vm) {
+        if (vm.weeklyBudgetCents == null) {
+          // Optional, unobtrusive tip to set budget
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.savings_outlined,
+                    size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Set a weekly budget in Settings',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => context.go(AppRouter.settings),
+                  child: const Text('Settings'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final util = vm.utilization ?? 0.0;
+        final clamped = util.clamp(0.0, 1.25);
+
+        Color badgeColor;
+        String badgeLabel;
+        switch (vm.status) {
+          case BudgetStatus.under:
+            badgeColor = Colors.green;
+            badgeLabel = 'Under Budget';
+            break;
+          case BudgetStatus.near:
+            badgeColor = Colors.orange;
+            badgeLabel = 'Near Budget';
+            break;
+          case BudgetStatus.over:
+            badgeColor = Colors.red;
+            badgeLabel = 'Over Budget';
+            break;
+          default:
+            badgeColor = Theme.of(context).colorScheme.outlineVariant;
+            badgeLabel = 'Budget';
+        }
+
+        return Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      // Status badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: badgeColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: badgeColor.withOpacity(0.3)),
+                        ),
+                        child: Text(
+                          badgeLabel,
+                          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                color: badgeColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: LinearProgressIndicator(
+                          value: clamped.toDouble(),
+                          minHeight: 8,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Estimated: ${formatCents(vm.weeklyTotalCents)} / Budget: ${formatCents(vm.weeklyBudgetCents ?? 0)}',
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (vm.status == BudgetStatus.over && (vm.overageCents ?? 0) > 0) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "You're ${formatCents(vm.overageCents!)} over this week. Try a cheaper plan?",
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onErrorContainer,
+                            ),
+                      ),
+                    ),
+                    FilledButton(
+                      onPressed: onGenerateCheaper,
+                      child: const Text('Generate Cheaper Plan'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+// Generate a cheaper plan variant from the main PlanPage state
+extension _CheaperPlanAction on _PlanPageState {
+  Future<void> _generateCheaperPlan() async {
+    try {
+      final recipes = await ref.read(allRecipesProvider.future);
+      final targets = await ref.read(currentUserTargetsProvider.future);
+      final ingredients = await ref.read(allIngredientsProvider.future);
+
+      if (targets == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please complete setup first')),
+        );
+        return;
+      }
+
+      final generator = ref.read(planGenerationServiceProvider);
+      final plan = await generator.generate(
+        targets: targets,
+        recipes: recipes,
+        ingredients: ingredients,
+        costBias: 0.9,
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.savePlan(plan);
+      await notifier.setCurrentPlan(plan.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cheaper plan generated')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
+    }
+  }
+}
+
+// Formatting helper: cents -> $dollars.xx
+String formatCents(int cents) => '\$' + (cents / 100).toStringAsFixed(2);
 
 class _WeekShortfallRow extends StatelessWidget {
   const _WeekShortfallRow({required this.item});

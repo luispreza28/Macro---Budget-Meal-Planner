@@ -20,6 +20,7 @@ class PlanGenerationService {
     required UserTargets targets,
     required List<Recipe> recipes,
     required List<Ingredient> ingredients,
+    double? costBias,
   }) async {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
@@ -78,6 +79,25 @@ class PlanGenerationService {
 
     final pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
       ..shuffle(rng);
+
+    // Optional: nudge selection toward cheaper recipes.
+    if (costBias != null && costBias > 0) {
+      assert(costBias >= 0 && costBias <= 1.0);
+      // ignore: avoid_print
+      // Debug note: gated at call sites typically; safe here as a one-liner.
+      // print('[GenCostBias] applying cost bias: $costBias');
+      // Build a lightweight score that prefers cheaper items.
+      final scores = <String, double>{};
+      for (final r in pool) {
+        final cents = r.costPerServCents.clamp(0, 2000);
+        final normalized = cents / 2000.0; // 0..1
+        final penalty = (costBias) * normalized; // 0..1
+        final base = rng.nextDouble();
+        final score = base - penalty; // lower => cheaper preferred
+        scores[r.id] = score;
+      }
+      pool.sort((a, b) => (scores[a.id]!).compareTo(scores[b.id]!));
+    }
 
     while (pool.length < mealsNeeded) {
       if (itemized.isNotEmpty) {

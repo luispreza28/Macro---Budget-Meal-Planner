@@ -1,0 +1,270 @@
+                                      recipeMap,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // Swap drawer
+                          if (isSwapDrawerOpen && selectedMealIndex != null)
+                            Positioned.fill(
+                              child: GestureDetector(
+                                onTap: _closeSwapDrawer,
+                                child: Container(
+                                  color: Colors.black.withOpacity(0.5),
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: GestureDetector(
+                                      onTap:
+                                          () {}, // Prevent closing when tapping drawer
+                                      child: _buildSwapDrawer(
+                                        plan,
+                                        recipeMap,
+                                        targets,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String error) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, size: 64, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(
+            'Error loading plan',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            error,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () {
+              ref.invalidate(currentPlanProvider);
+              ref.invalidate(currentUserTargetsProvider);
+            },
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoTargetsState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.settings, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          Text(
+            'Setup Required',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Please complete your setup to generate meal plans.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () => context.go(AppRouter.onboarding),
+            child: const Text('Complete Setup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNoPlanState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.restaurant_menu, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          Text(
+            'No Meal Plan',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Generate your first meal plan to get started.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: () async {
+              await _generateNewPlan();
+            },
+            child: const Text('Generate Plan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSwapDrawer(
+    Plan plan,
+    Map<String, Recipe> recipeMap,
+    UserTargets targets,
+  ) {
+    if (selectedMealIndex == null) return const SizedBox.shrink();
+
+    // Get current meal details
+    int dayIndex = 0;
+    int mealIndex = 0;
+    int currentIndex = 0;
+    var found = false;
+
+    // Find the selected meal
+    for (int d = 0; d < plan.days.length && !found; d++) {
+      final day = plan.days[d];
+      for (int m = 0; m < day.meals.length; m++) {
+        if (currentIndex == selectedMealIndex) {
+          dayIndex = d;
+          mealIndex = m;
+          found = true;
+          break;
+        }
+        currentIndex++;
+      }
+    }
+
+    final currentMeal = plan.days[dayIndex].meals[mealIndex];
+    final currentRecipe = recipeMap[currentMeal.recipeId];
+
+    if (currentRecipe == null) {
+      return const SizedBox.shrink();
+    }
+
+    final mealsInDay = plan.days[dayIndex].meals.length;
+    final perMealCount = mealsInDay < 1 ? 1 : (mealsInDay > 6 ? 6 : mealsInDay);
+
+    final perMealKcal = targets.kcal / perMealCount;
+    final perMealProtein = targets.proteinG / perMealCount;
+    final perMealCarbs = targets.carbsG / perMealCount;
+    final perMealFat = targets.fatG / perMealCount;
+
+    int? perMealBudgetCents;
+    if (targets.budgetCents != null) {
+      final dailyBudget = targets.budgetCents! / 7.0;
+      perMealBudgetCents = (dailyBudget / perMealCount).round();
+    }
+
+    final ctx = SwapContext(
+      currentRecipeId: currentRecipe.id,
+      targetKcal: perMealKcal,
+      targetProteinG: perMealProtein,
+      targetCarbsG: perMealCarbs,
+      targetFatG: perMealFat,
+      mealIndex: selectedMealIndex!,
+      targetsId: targets.id,
+      budgetCents: perMealBudgetCents,
+      limit: 12,
+    );
+
+    return Consumer(
+      builder: (context, ref, _) {
+        final suggestionsAsync = ref.watch(swapSuggestionsProvider(ctx));
+
+        return suggestionsAsync.when(
+          loading: () => SwapDrawer.loading(
+            currentRecipe: currentRecipe,
+            onClose: _closeSwapDrawer,
+          ),
+          error: (error, stackTrace) => SwapDrawer.error(
+            currentRecipe: currentRecipe,
+            onClose: _closeSwapDrawer,
+            message: 'Couldn’t load suggestions',
+          ),
+          data: (alternatives) {
+            final fallback = recipeMap.values
+                .where((recipe) => recipe.id != currentRecipe.id)
+                .take(5)
+                .map(
+                  (recipe) => SwapOption(
+                    recipe: recipe,
+                    reasons: const [],
+                    costDeltaCents:
+                        recipe.costPerServCents -
+                        currentRecipe.costPerServCents,
+                    proteinDeltaG:
+                        recipe.macrosPerServ.proteinG -
+                        currentRecipe.macrosPerServ.proteinG,
+                    kcalDelta:
+                        recipe.macrosPerServ.kcal -
+                        currentRecipe.macrosPerServ.kcal,
+                  ),
+                )
+                .toList(growable: false);
+
+            final options = alternatives.isNotEmpty ? alternatives : fallback;
+
+            return SwapDrawer(
+              currentRecipe: currentRecipe,
+              alternatives: options,
+              onSwapSelected: (newRecipe) {
+                unawaited(_handleSwapSelected(dayIndex, mealIndex, newRecipe));
+              },
+              onClose: _closeSwapDrawer,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _handleMealTap(
+    int dayIndex,
+    int mealIndex,
+    plan,
+    Map<String, Recipe> recipeMap,
+  ) {
+    final globalMealIndex = dayIndex * plan.days[0].meals.length + mealIndex;
+
+    setState(() {
+      if (selectedMealIndex == globalMealIndex) {
+        // Same meal tapped - open swap drawer
+        isSwapDrawerOpen = true;
+      } else {
+        // Different meal selected
+        selectedMealIndex = globalMealIndex.toInt();
+        isSwapDrawerOpen = false;
+      }
+    });
+  }
+
+  void _closeSwapDrawer() {
+    setState(() {
+      isSwapDrawerOpen = false;
+    });
+  }
+
+  Future<void> _handleSwapSelected(
+    int dayIndex,
+    int mealIndex,
+    Recipe newRecipe,

@@ -14,6 +14,7 @@ import '../../providers/shortfall_providers.dart';
 import '../../providers/plan_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../../domain/value/shortfall_item.dart';
+import '../../providers/shopping_list_providers.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});

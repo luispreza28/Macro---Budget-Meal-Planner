@@ -1,0 +1,270 @@
+  ) async {
+    final planAsync = ref.read(currentPlanProvider);
+    final recipes = await ref.read(allRecipesProvider.future);
+    final recipeMap = {for (final recipe in recipes) recipe.id: recipe};
+    final plan = planAsync.asData?.value;
+
+    if (plan == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No active plan to update')));
+      return;
+    }
+
+    try {
+      final updated = _planWithSwappedMeal(
+        plan: plan,
+        dayIndex: dayIndex,
+        mealIndex: mealIndex,
+        newRecipeId: newRecipe.id,
+        recipeMap: recipeMap,
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.updatePlan(updated);
+
+      if (!mounted) return;
+      setState(() {
+        isSwapDrawerOpen = false;
+        selectedMealIndex = null;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Swapped to ${newRecipe.name}')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to swap: $e')));
+    }
+  }
+
+  /// Generate a new plan (now also fetching ingredients so the generator
+  /// can compute totals from recipe.items).
+  Future<void> _generateNewPlan() async {
+    try {
+      final recipes = await ref.read(allRecipesProvider.future);
+      final targets = await ref.read(currentUserTargetsProvider.future);
+      final ingredients = await ref.read(allIngredientsProvider.future);
+
+      if (targets == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please complete setup first')),
+        );
+        return;
+      }
+
+      final generator = ref.read(planGenerationServiceProvider);
+      final plan = await generator.generate(
+        targets: targets,
+        recipes: recipes,
+        ingredients: ingredients,
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.savePlan(plan);
+      await notifier.setCurrentPlan(plan.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Weekly plan generated')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
+    }
+  }
+
+  void _showExportChooser(
+    Plan plan,
+    Map<String, Recipe> recipeMap,
+    Map<String, Ingredient> ingredientMap,
+  ) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Export Plan'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              try {
+                await ExportService.sharePlanText(
+                  plan: plan,
+                  recipes: recipeMap,
+                  ingredients: ingredientMap,
+                );
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Shared as text')));
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+              }
+            },
+            child: const Text('Share as Text (.txt)'),
+          ),
+          SimpleDialogOption(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              try {
+                await ExportService.sharePlanCsv(
+                  plan: plan,
+                  recipes: recipeMap,
+                  ingredients: ingredientMap,
+                );
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Shared as CSV')));
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+              }
+            },
+            child: const Text('Share as CSV (.csv)'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeekShortfallsCard extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_WeekShortfallsCard> createState() => _WeekShortfallsCardState();
+}
+
+class _WeekShortfallsCardState extends ConsumerState<_WeekShortfallsCard> {
+  bool _adding = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final asyncShortfalls = ref.watch(shortfallForCurrentPlanProvider);
+    return asyncShortfalls.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        // compact: show at most 4 rows, then +N more
+        final maxRows = 4;
+        final more = items.length > maxRows ? items.length - maxRows : 0;
+        final visible = items.take(maxRows).toList();
+
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Week Shortfalls',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const Spacer(),
+                    if (more > 0)
+                      Text('+$more more', style: Theme.of(context).textTheme.labelMedium),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ...visible.map((it) => _WeekShortfallRow(item: it)).toList(),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: _adding
+                        ? null
+                        : () async {
+                            setState(() => _adding = true);
+                            try {
+                              final plan = await ref.read(currentPlanProvider.future);
+                              final repo = ref.read(shoppingListRepositoryProvider);
+                              await repo.addShortfalls(items, planId: plan?.id);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Added ${items.length} items to Shopping List')),
+                              );
+                              ref.invalidate(shoppingListItemsProvider);
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Failed to add: $e')),
+                              );
+                            } finally {
+                              if (mounted) setState(() => _adding = false);
+                            }
+                          },
+                    icon: const Icon(Icons.add_shopping_cart),
+                    label: const Text('Add All to Shopping List'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Generate a new plan with a bias toward cheaper recipes.
+  Future<void> _generateCheaperPlan() async {
+    try {
+      final recipes = await ref.read(allRecipesProvider.future);
+      final targets = await ref.read(currentUserTargetsProvider.future);
+      final ingredients = await ref.read(allIngredientsProvider.future);
+
+      if (targets == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please complete setup first')),
+        );
+        return;
+      }
+
+      final generator = ref.read(planGenerationServiceProvider);
+      final plan = await generator.generate(
+        targets: targets,
+        recipes: recipes,
+        ingredients: ingredients,
+        costBias: 0.9, // Strong nudge toward cheaper options
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.savePlan(plan);
+      await notifier.setCurrentPlan(plan.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cheaper plan generated')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
+    }
+  }
+}
+
+class _BudgetHeader extends ConsumerWidget {
+  const _BudgetHeader({required this.onGenerateCheaper});
+  final Future<void> Function() onGenerateCheaper;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final budgetAsync = ref.watch(budgetStatusProvider);
