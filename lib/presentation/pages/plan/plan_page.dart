@@ -30,6 +30,8 @@ import '../../providers/budget_providers.dart';
 import '../../providers/shopping_list_providers.dart';
 import '../../providers/plan_pin_providers.dart';
 import '../../providers/recipe_pref_providers.dart';
+import '../../../domain/services/variety_options.dart';
+import '../../../domain/services/variety_prefs_service.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -560,12 +562,30 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         return;
       }
 
+      // Variety preferences + history
+      final prefs = ref.read(varietyPrefsServiceProvider);
+      final maxRepeats = await prefs.maxRepeatsPerWeek();
+      final proteinSpread = await prefs.enableProteinSpread();
+      final cuisineRotation = await prefs.enableCuisineRotation();
+      final prepMix = await prefs.enablePrepMix();
+      final lookback = await prefs.historyLookbackPlans();
+      final recent = lookback > 0
+          ? await ref.read(planRepositoryProvider).getRecentPlans(limit: lookback)
+          : const <Plan>[];
+
       final generator = ref.read(planGenerationServiceProvider);
       final plan = await generator.generate(
         targets: targets,
         recipes: recipes,
         ingredients: ingredients,
         costBias: 0.9, // Strong nudge toward cheaper options
+        varietyOptions: VarietyOptions(
+          maxRepeatsPerWeek: maxRepeats,
+          enableProteinSpread: proteinSpread,
+          enableCuisineRotation: cuisineRotation,
+          enablePrepMix: prepMix,
+          historyPlans: recent,
+        ),
       );
 
       final notifier = ref.read(planNotifierProvider.notifier);
@@ -650,6 +670,17 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         return;
       }
 
+      // Variety preferences + history
+      final prefs = ref.read(varietyPrefsServiceProvider);
+      final maxRepeats = await prefs.maxRepeatsPerWeek();
+      final proteinSpread = await prefs.enableProteinSpread();
+      final cuisineRotation = await prefs.enableCuisineRotation();
+      final prepMix = await prefs.enablePrepMix();
+      final lookback = await prefs.historyLookbackPlans();
+      final recent = lookback > 0
+          ? await ref.read(planRepositoryProvider).getRecentPlans(limit: lookback)
+          : const <Plan>[];
+
       final generator = ref.read(planGenerationServiceProvider);
       final plan = await generator.generate(
         targets: targets,
@@ -659,6 +690,13 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         pinnedSlots: pinnedSlots,
         excludedRecipeIds: excluded,
         favoriteRecipeIds: favorites,
+        varietyOptions: VarietyOptions(
+          maxRepeatsPerWeek: maxRepeats,
+          enableProteinSpread: proteinSpread,
+          enableCuisineRotation: cuisineRotation,
+          enablePrepMix: prepMix,
+          historyPlans: recent,
+        ),
       );
 
       final notifier = ref.read(planNotifierProvider.notifier);

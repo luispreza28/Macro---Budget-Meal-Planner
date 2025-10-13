@@ -11,6 +11,7 @@ import '../../providers/ingredient_providers.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../../domain/entities/ingredient.dart';
+import '../../../domain/services/variety_prefs_service.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -27,6 +28,38 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _highContrastEnabled = false;
   String _selectedUnits = 'metric';
   String _selectedCurrency = 'USD';
+
+  // Variety & Repetition prefs
+  bool _loadingVariety = true;
+  int _maxRepeatsPerWeek = 1; // 1..2
+  bool _enableProteinSpread = true;
+  bool _enableCuisineRotation = true;
+  bool _enablePrepMix = true;
+  int _historyLookbackPlans = 2; // 0..4
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVarietyPrefs();
+  }
+
+  Future<void> _loadVarietyPrefs() async {
+    final svc = ref.read(varietyPrefsServiceProvider);
+    final maxRep = await svc.maxRepeatsPerWeek();
+    final prot = await svc.enableProteinSpread();
+    final cui = await svc.enableCuisineRotation();
+    final prep = await svc.enablePrepMix();
+    final hist = await svc.historyLookbackPlans();
+    if (!mounted) return;
+    setState(() {
+      _maxRepeatsPerWeek = maxRep;
+      _enableProteinSpread = prot;
+      _enableCuisineRotation = cui;
+      _enablePrepMix = prep;
+      _historyLookbackPlans = hist;
+      _loadingVariety = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +98,112 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
 
           const SizedBox(height: 16),
+
+          // Variety & Repetition Section
+          _buildSectionHeader('Variety & Repetition'),
+          if (_loadingVariety)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.repeat),
+                    title: const Text('Max repeats per week'),
+                    subtitle: Text('Same recipe up to ${_maxRepeatsPerWeek}x'),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Row(
+                      children: [
+                        const Text('1'),
+                        Expanded(
+                          child: Slider(
+                            value: _maxRepeatsPerWeek.toDouble(),
+                            min: 1,
+                            max: 2,
+                            divisions: 1,
+                            label: '$_maxRepeatsPerWeek',
+                            onChanged: (v) async {
+                              final n = v.round();
+                              setState(() => _maxRepeatsPerWeek = n);
+                              await ref.read(varietyPrefsServiceProvider).setMaxRepeatsPerWeek(n);
+                            },
+                          ),
+                        ),
+                        const Text('2'),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    title: const Text('Spread proteins'),
+                    subtitle: const Text('Avoid streaks of the same protein'),
+                    value: _enableProteinSpread,
+                    onChanged: (v) async {
+                      setState(() => _enableProteinSpread = v);
+                      await ref.read(varietyPrefsServiceProvider).setEnableProteinSpread(v);
+                    },
+                    secondary: const Icon(Icons.restaurant),
+                  ),
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    title: const Text('Rotate cuisines'),
+                    subtitle: const Text('Avoid same cuisine back-to-back'),
+                    value: _enableCuisineRotation,
+                    onChanged: (v) async {
+                      setState(() => _enableCuisineRotation = v);
+                      await ref.read(varietyPrefsServiceProvider).setEnableCuisineRotation(v);
+                    },
+                    secondary: const Icon(Icons.public),
+                  ),
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    title: const Text('Mix prep times'),
+                    subtitle: const Text('Include quick meals and avoid all long'),
+                    value: _enablePrepMix,
+                    onChanged: (v) async {
+                      setState(() => _enablePrepMix = v);
+                      await ref.read(varietyPrefsServiceProvider).setEnablePrepMix(v);
+                    },
+                    secondary: const Icon(Icons.timer),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.history),
+                    title: const Text('Look back window (plans)'),
+                    subtitle: Text(_historyLookbackPlans == 0 ? 'Off' : 'Last $_historyLookbackPlans plan(s)'),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Row(
+                      children: [
+                        const Text('0'),
+                        Expanded(
+                          child: Slider(
+                            value: _historyLookbackPlans.toDouble(),
+                            min: 0,
+                            max: 4,
+                            divisions: 4,
+                            label: '$_historyLookbackPlans',
+                            onChanged: (v) async {
+                              final n = v.round();
+                              setState(() => _historyLookbackPlans = n);
+                              await ref.read(varietyPrefsServiceProvider).setHistoryLookbackPlans(n);
+                            },
+                          ),
+                        ),
+                        const Text('4'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // DEV utilities
           _buildSectionHeader('DEV'),

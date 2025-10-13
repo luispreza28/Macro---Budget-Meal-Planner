@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../providers/recipe_pref_providers.dart';
+import '../../../domain/services/recipe_features.dart';
+import '../../../domain/services/variety_prefs_service.dart';
 
 /// Bottom drawer for showing meal swap options
 class SwapDrawer extends ConsumerStatefulWidget {
@@ -48,6 +50,19 @@ class SwapDrawer extends ConsumerStatefulWidget {
 class _SwapDrawerState extends ConsumerState<SwapDrawer> {
   bool _favoritesOnly = false;
   bool _hideExcluded = true;
+  bool _avoidRepetition = true; // mirrors prefs (default ON)
+
+  @override
+  void initState() {
+    super.initState();
+    // Mirror prefs default for a gentle alignment
+    Future.microtask(() async {
+      final svc = ref.read(varietyPrefsServiceProvider);
+      final spread = await svc.enableProteinSpread();
+      if (!mounted) return;
+      setState(() => _avoidRepetition = spread);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -80,13 +95,28 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
       final favs = favAsync.asData?.value ?? const <String>{};
       final excluded = exAsync.asData?.value ?? const <String>{};
 
-      final filtered = alternatives.where((opt) {
+      List<SwapOption> filtered = alternatives.where((opt) {
         final isFav = favs.contains(opt.recipe.id);
         final isEx = excluded.contains(opt.recipe.id);
         if (_hideExcluded && isEx) return false;
         if (_favoritesOnly && !isFav) return false;
         return true;
       }).toList(growable: false);
+
+      if (_avoidRepetition && filtered.isNotEmpty) {
+        final current = widget.currentRecipe;
+        final curProt = RecipeFeatures.proteinTag(current);
+        final curCui = RecipeFeatures.cuisineTag(current);
+        final curBucket = RecipeFeatures.prepBucket(current);
+        double score(SwapOption opt) {
+          double s = 0;
+          if (RecipeFeatures.proteinTag(opt.recipe) == curProt) s -= 0.35;
+          if (RecipeFeatures.cuisineTag(opt.recipe) == curCui) s -= 0.25;
+          if (RecipeFeatures.prepBucket(opt.recipe) == curBucket) s -= 0.15;
+          return s;
+        }
+        filtered = [...filtered]..sort((a, b) => score(b).compareTo(score(a)));
+      }
 
       content = ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -171,6 +201,12 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                   label: const Text('Hide excluded'),
                   selected: _hideExcluded,
                   onSelected: (v) => setState(() => _hideExcluded = v),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Avoid repetition'),
+                  selected: _avoidRepetition,
+                  onSelected: (v) => setState(() => _avoidRepetition = v),
                 ),
               ],
             ),

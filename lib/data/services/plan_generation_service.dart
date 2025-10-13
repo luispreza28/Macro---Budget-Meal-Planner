@@ -6,6 +6,8 @@ import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
 import '../../domain/entities/user_targets.dart';
+import '../../domain/services/recipe_features.dart';
+import '../../domain/services/variety_options.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
 /// Falls back to Recipe.macrosPerServ and costPerServCents if items are missing.
@@ -26,6 +28,7 @@ class PlanGenerationService {
     Map<String, String>? pinnedSlots, // slotKey -> recipeId
     Set<String>? excludedRecipeIds, // avoid these recipes entirely
     Set<String>? favoriteRecipeIds, // optional, used with favoriteBias
+    VarietyOptions? varietyOptions,
   }) async {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
@@ -87,8 +90,8 @@ class PlanGenerationService {
     final pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
       ..shuffle(rng);
 
-    // Build a score map to sort candidates with optional biases
-    final scores = <String, double>{};
+    // Build a base score map to sort candidates with optional biases
+    final baseScores = <String, double>{};
     final doCost = costBias != null && costBias > 0;
     final favs = favoriteRecipeIds ?? const <String>{};
     final fb = (favoriteBias ?? 0).clamp(0.0, 1.0);
@@ -112,9 +115,9 @@ class PlanGenerationService {
           final isFav = favs.contains(r.id) ? 1.0 : 0.0;
           score += fb * isFav;
         }
-        scores[r.id] = score;
+        baseScores[r.id] = score;
       }
-      pool.sort((a, b) => (scores[b.id]!).compareTo(scores[a.id]!)); // higher score first
+      pool.sort((a, b) => (baseScores[b.id] ?? 0).compareTo(baseScores[a.id] ?? 0)); // higher score first
     }
 
     while (pool.length < mealsNeeded) {
@@ -141,22 +144,151 @@ class PlanGenerationService {
 
     Recipe? lastPicked;
     int poolCursor = 0;
+    final selectedCounts = <String, int>{}; // recipeId -> times selected in current week
+    final proteinCache = <String, String>{};
+    final cuisineCache = <String, String>{};
+    final bucketCache = <String, String>{};
+    final bucketCounts = <String, int>{'quick': 0, 'medium': 0, 'long': 0};
+    final lastForMealIndex = <int, Recipe?>{}; // mealIndex -> last recipe (prev day)
 
-    Recipe _pickWithNoImmediateRepeat(Set<String> usedThisDay) {
-      for (int attempt = 0; attempt < pool.length; attempt++) {
-        final int index = (poolCursor + attempt) % pool.length;
-        final candidate = pool[index];
-        final bool repeatsLast = candidate.id == lastPicked?.id;
-        final bool usedInDay = usedThisDay.contains(candidate.id);
-        if (!repeatsLast && !usedInDay) {
-          poolCursor = (index + 1) % pool.length;
-          return candidate;
+    // History cooldown map from recent plans
+    final cooldownUsage = <String, int>{};
+    if (varietyOptions != null && varietyOptions.historyPlans.isNotEmpty) {
+      for (final p in varietyOptions.historyPlans) {
+        for (final d in p.days) {
+          for (final m in d.meals) {
+            cooldownUsage[m.recipeId] = (cooldownUsage[m.recipeId] ?? 0) + 1;
+          }
+        }
+      }
+    }
+
+    // Variety penalty constants
+    const double P_REPEAT_HARD = 1.5;
+    const double P_REPEAT_SOFT = 0.4;
+    const double P_STREAK_PROTEIN = 0.35;
+    const double P_STREAK_CUISINE = 0.25;
+    const double P_PREP_IMBALANCE = 0.2;
+    const double P_COOLDOWN = 0.2;
+    const int COOLDOWN_CAP = 3;
+
+    String _proteinOf(Recipe r) =>
+        proteinCache[r.id] ??= RecipeFeatures.proteinTag(r);
+    String _cuisineOf(Recipe r) =>
+        cuisineCache[r.id] ??= RecipeFeatures.cuisineTag(r);
+    String _bucketOf(Recipe r) => bucketCache[r.id] ??= RecipeFeatures.prepBucket(r);
+
+    double _scoreWithVariety(Recipe candidate, {
+      required Set<String> usedThisDay,
+      required int dayIndex,
+      required int mealIndex,
+    }) {
+      // Start from base score (cost/fav) with slight randomness
+      double score = (baseScores[candidate.id] ?? 0) + rng.nextDouble() * 0.01;
+
+      // Repeat penalty this week (soft when approaching limit, hard when exceeding)
+      final maxRepeats = varietyOptions?.maxRepeatsPerWeek ?? 1;
+      final usedCount = selectedCounts[candidate.id] ?? 0;
+      if (usedCount >= maxRepeats) {
+        score -= P_REPEAT_HARD;
+        if (kDebugMode) {
+          debugPrint('[Variety] repeatPenalty=HARD id=${candidate.id} count=$usedCount');
+        }
+      } else if (usedCount == maxRepeats - 1 && maxRepeats > 0) {
+        score -= P_REPEAT_SOFT;
+        if (kDebugMode) {
+          debugPrint('[Variety] repeatPenalty=SOFT id=${candidate.id} count=$usedCount');
         }
       }
 
-      final fallback = pool[poolCursor % pool.length];
-      poolCursor = (poolCursor + 1) % pool.length;
-      return fallback;
+      // Protein/cuisine streak penalties (compare with previous picks)
+      if (varietyOptions?.enableProteinSpread ?? true) {
+        final prev = lastPicked;
+        final prevSameMeal = lastForMealIndex[mealIndex];
+        final candProt = _proteinOf(candidate);
+        if (prev != null && _proteinOf(prev) == candProt) {
+          score -= P_STREAK_PROTEIN;
+          if (kDebugMode) {
+            debugPrint('[Variety] proteinStreak=prevSlot');
+          }
+        }
+        if (prevSameMeal != null && _proteinOf(prevSameMeal) == candProt) {
+          score -= P_STREAK_PROTEIN * 0.8; // smaller penalty for day-to-day streak
+        }
+      }
+
+      if (varietyOptions?.enableCuisineRotation ?? true) {
+        final prev = lastPicked;
+        final prevSameMeal = lastForMealIndex[mealIndex];
+        final candCui = _cuisineOf(candidate);
+        if (prev != null && _cuisineOf(prev) == candCui) {
+          score -= P_STREAK_CUISINE;
+          if (kDebugMode) {
+            debugPrint('[Variety] cuisineStreak=prevSlot');
+          }
+        }
+        if (prevSameMeal != null && _cuisineOf(prevSameMeal) == candCui) {
+          score -= P_STREAK_CUISINE * 0.8;
+        }
+      }
+
+      // Prep bucket mix: encourage at least one quick and avoid all-long
+      if (varietyOptions?.enablePrepMix ?? true) {
+        final candB = _bucketOf(candidate);
+        final hasQuick = (bucketCounts['quick'] ?? 0) > 0;
+        final totalSoFar = bucketCounts.values.fold<int>(0, (a, b) => a + b);
+        final allLongSoFar = totalSoFar > 0 && (bucketCounts['long'] ?? 0) == totalSoFar;
+        if (!hasQuick && candB != 'quick') {
+          score -= P_PREP_IMBALANCE;
+          if (kDebugMode) debugPrint('[Variety] prepImbalance=noQuickYet');
+        }
+        if (allLongSoFar && candB == 'long') {
+          score -= P_PREP_IMBALANCE;
+        }
+      }
+
+      // History cooldown
+      if ((varietyOptions?.historyPlans.isNotEmpty ?? false)) {
+        final usage = cooldownUsage[candidate.id] ?? 0;
+        if (usage > 0) {
+          final penalty = P_COOLDOWN * (usage > COOLDOWN_CAP ? COOLDOWN_CAP : usage);
+          score -= penalty;
+          if (kDebugMode) {
+            debugPrint('[Variety] cooldown usage=$usage penalty=$penalty');
+          }
+        }
+      }
+
+      // Clamp lower bound to avoid runaway negatives
+      if (score < -10) score = -10;
+      return score;
+    }
+
+    Recipe _pickWithScoring(Set<String> usedThisDay, int dayIndex, int mealIndex) {
+      // Evaluate a limited window of candidates to keep runtime small
+      final window = min(pool.length, 24);
+      Recipe? best;
+      double bestScore = double.negativeInfinity;
+      for (int attempt = 0; attempt < window; attempt++) {
+        final int index = (poolCursor + attempt) % pool.length;
+        final candidate = pool[index];
+        if (usedThisDay.contains(candidate.id)) {
+          continue; // avoid duplicate within day (hard)
+        }
+        final s = _scoreWithVariety(candidate, usedThisDay: usedThisDay, dayIndex: dayIndex, mealIndex: mealIndex);
+        if (s > bestScore) {
+          bestScore = s;
+          best = candidate;
+        }
+      }
+      if (best == null) {
+        // fallback sequential
+        best = pool[poolCursor % pool.length];
+      }
+      // advance cursor past chosen
+      final chosenIndex = pool.indexOf(best!);
+      poolCursor = (chosenIndex + 1) % pool.length;
+      return best;
     }
 
     final pins = pinnedSlots ?? const <String, String>{};
@@ -179,10 +311,14 @@ class PlanGenerationService {
             debugPrint('[GenBias] pinned slot $slotKey -> ${pinned.id}');
           }
         } else {
-          recipe = _pickWithNoImmediateRepeat(usedThisDay);
+          recipe = _pickWithScoring(usedThisDay, d, m);
         }
         usedThisDay.add(recipe.id);
         lastPicked = recipe;
+        lastForMealIndex[m] = recipe;
+        selectedCounts[recipe.id] = (selectedCounts[recipe.id] ?? 0) + 1;
+        final b = _bucketOf(recipe);
+        bucketCounts[b] = (bucketCounts[b] ?? 0) + 1;
 
         const servings = 1.0;
 
