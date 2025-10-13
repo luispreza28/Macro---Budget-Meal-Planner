@@ -1,5 +1,6 @@
 // lib/data/services/plan_generation_service.dart
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
@@ -83,9 +84,9 @@ class PlanGenerationService {
     // Optional: nudge selection toward cheaper recipes.
     if (costBias != null && costBias > 0) {
       assert(costBias >= 0 && costBias <= 1.0);
-      // ignore: avoid_print
-      // Debug note: gated at call sites typically; safe here as a one-liner.
-      // print('[GenCostBias] applying cost bias: $costBias');
+      if (kDebugMode) {
+        debugPrint('[GenCostBias] applying cost bias: $costBias');
+      }
       // Build a lightweight score that prefers cheaper items.
       final scores = <String, double>{};
       for (final r in pool) {
