@@ -7,7 +7,7 @@ import '../../data/repositories/recipe_repository_impl.dart';
 // Temporarily disabled due to interface mismatches - will be fixed in Stage 6
 // import '../../data/repositories/user_targets_repository_impl.dart';
 import '../../data/repositories/pantry_repository_impl.dart';
-// Use relative import to ensure resolution in all IDE setups
+// Import PlanRepository implementation
 import '../../data/repositories/plan_repository_impl.dart';
 // import '../../data/repositories/price_override_repository_impl.dart';
 import '../../data/services/data_integrity_service.dart';

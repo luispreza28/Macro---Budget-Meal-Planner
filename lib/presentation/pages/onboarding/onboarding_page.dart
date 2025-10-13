@@ -4,6 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../router/app_router.dart';
 import '../../providers/user_targets_providers.dart';
+import '../../providers/database_providers.dart';
+import '../../providers/plan_providers.dart';
+import '../../providers/recipe_providers.dart';
+import '../../providers/ingredient_providers.dart';
+import '../../providers/budget_providers.dart';
 import '../../widgets/onboarding_step_indicator.dart';
 import 'onboarding_controller.dart';
 import 'steps/goals_step.dart';
@@ -126,27 +131,54 @@ class OnboardingPage extends ConsumerWidget {
     UserTargetsNotifier userTargetsNotifier,
   ) async {
     if (state.currentStep == OnboardingController.totalSteps - 1) {
-      // Final step - save user targets and complete onboarding
+      // Final step - save user targets, generate first plan, and complete onboarding
       try {
         final userTargets = state.toUserTargets();
+        // Persist targets
         await userTargetsNotifier.saveUserTargets(userTargets);
         await userTargetsNotifier.markOnboardingCompleted();
-        
+
+        // Also set the v1 onboarding flag explicitly for gating
+        final prefs = ref.read(sharedPreferencesProvider);
+        await prefs.setBool(kOnboardingDone, true);
+
+        // Generate first plan
+        final gen = ref.read(planGenerationServiceProvider);
+        final recipes = await ref.read(allRecipesProvider.future);
+        final ingredients = await ref.read(allIngredientsProvider.future);
+        // Respect diet flags on first generation if provided
+        final filteredRecipes = userTargets.dietFlags.isEmpty
+            ? recipes
+            : recipes
+                .where((r) => r.isCompatibleWithDiet(userTargets.dietFlags))
+                .toList(growable: false);
+
+        final plan = await gen.generate(
+          targets: userTargets,
+          recipes: filteredRecipes.isEmpty ? recipes : filteredRecipes,
+          ingredients: ingredients,
+        );
+
+        // Save and select plan
+        final planRepo = ref.read(planRepositoryProvider);
+        await planRepo.addPlan(plan);
+        await ref.read(planNotifierProvider.notifier).setCurrentPlan(plan.id);
+
+        // Invalidate dependent providers so UI refreshes
+        ref.invalidate(currentUserTargetsProvider);
+        ref.invalidate(currentPlanProvider);
+        ref.invalidate(weeklyCostSummaryProvider);
+        ref.invalidate(budgetStatusProvider);
+
         if (context.mounted) {
-          // Show success and navigate to home
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Setup complete! Generating your first meal plan...'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          context.go(AppRouter.home);
+          // Navigate to plan page after success
+          context.go(AppRouter.plan);
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Error saving settings: $e'),
+              content: Text('Error completing setup: $e'),
               backgroundColor: Colors.red,
             ),
           );

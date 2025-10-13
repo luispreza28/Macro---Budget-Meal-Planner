@@ -368,7 +368,7 @@ class ExportService {
       buffer.writeln(_aisleDisplay(g.aisle) + ':');
       for (final it in g.items) {
         final price = it.estimatedCostCents > 0
-            ? ' ~\\$${(it.estimatedCostCents / 100).toStringAsFixed(2)}'
+            ? ' ~\$${(it.estimatedCostCents / 100).toStringAsFixed(2)}'
             : '';
         final packs = it.packsNeeded != null ? ' x${it.packsNeeded}' : '';
         buffer.writeln('  • ${it.ingredient.name} — ${_trim(it.totalQty)} ${it.unit.name}$packs$price');

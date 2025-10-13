@@ -17,7 +17,6 @@ import '../../../domain/entities/recipe.dart';
 import '../../../domain/entities/plan.dart';
 import '../../../domain/entities/user_targets.dart';
 import '../../widgets/plan_widgets/swap_drawer.dart';
-import '../../providers/database_providers.dart';
 import '../../services/export_service.dart';
 import '../../services/export_service.dart' as svc;
 import '../../../domain/entities/ingredient.dart' as ing;
@@ -254,7 +253,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                               // Budget header (weekly)
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                                child: _BudgetHeader(onGenerateCheaper: _generateCheaperPlan),
+                                child: _BudgetHeader(onGenerateCheaper: () => _generateCheaperPlan()),
                               ),
 
                               // Week Shortfalls card
@@ -540,6 +539,49 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     setState(() {
       isSwapDrawerOpen = false;
     });
+  }
+
+  /// Generate a new plan with a bias toward cheaper recipes.
+  Future<void> _generateCheaperPlan() async {
+    try {
+      final recipes = await ref.read(allRecipesProvider.future);
+      final targets = await ref.read(currentUserTargetsProvider.future);
+      final ingredients = await ref.read(allIngredientsProvider.future);
+      // Keep room for future use of these signals
+      // final pinnedSlots = await ref.read(pinsForCurrentPlanProvider.future);
+      // final excluded = await ref.read(excludedRecipesProvider.future);
+      // final favorites = await ref.read(favoriteRecipesProvider.future);
+
+      if (targets == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please complete setup first')),
+        );
+        return;
+      }
+
+      final generator = ref.read(planGenerationServiceProvider);
+      final plan = await generator.generate(
+        targets: targets,
+        recipes: recipes,
+        ingredients: ingredients,
+        costBias: 0.9, // Strong nudge toward cheaper options
+      );
+
+      final notifier = ref.read(planNotifierProvider.notifier);
+      await notifier.savePlan(plan);
+      await notifier.setCurrentPlan(plan.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cheaper plan generated')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
+    }
   }
 
   Future<void> _handleSwapSelected(
@@ -835,47 +877,6 @@ class _WeekShortfallsCardState extends ConsumerState<_WeekShortfallsCard> {
     );
   }
 
-  /// Generate a new plan with a bias toward cheaper recipes.
-  Future<void> _generateCheaperPlan() async {
-    try {
-      final recipes = await ref.read(allRecipesProvider.future);
-      final targets = await ref.read(currentUserTargetsProvider.future);
-      final ingredients = await ref.read(allIngredientsProvider.future);
-      final pinnedSlots = await ref.read(pinsForCurrentPlanProvider.future);
-      final excluded = await ref.read(excludedRecipesProvider.future);
-      final favorites = await ref.read(favoriteRecipesProvider.future);
-
-      if (targets == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please complete setup first')),
-        );
-        return;
-      }
-
-      final generator = ref.read(planGenerationServiceProvider);
-      final plan = await generator.generate(
-        targets: targets,
-        recipes: recipes,
-        ingredients: ingredients,
-        costBias: 0.9, // Strong nudge toward cheaper options
-      );
-
-      final notifier = ref.read(planNotifierProvider.notifier);
-      await notifier.savePlan(plan);
-      await notifier.setCurrentPlan(plan.id);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Cheaper plan generated')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
-    }
-  }
 }
 
 class _BudgetHeader extends ConsumerWidget {
@@ -1023,50 +1024,7 @@ class _BudgetHeader extends ConsumerWidget {
   }
 }
 
-// Generate a cheaper plan variant from the main PlanPage state
-extension _CheaperPlanAction on _PlanPageState {
-  Future<void> _generateCheaperPlan() async {
-    try {
-      final recipes = await ref.read(allRecipesProvider.future);
-      final targets = await ref.read(currentUserTargetsProvider.future);
-      final ingredients = await ref.read(allIngredientsProvider.future);
-
-      if (targets == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please complete setup first')),
-        );
-        return;
-      }
-
-      final generator = ref.read(planGenerationServiceProvider);
-      final plan = await generator.generate(
-        targets: targets,
-        recipes: recipes,
-        ingredients: ingredients,
-        costBias: 0.9,
-        favoriteBias: 0.25,
-        pinnedSlots: pinnedSlots,
-        excludedRecipeIds: excluded,
-        favoriteRecipeIds: favorites,
-      );
-
-      final notifier = ref.read(planNotifierProvider.notifier);
-      await notifier.savePlan(plan);
-      await notifier.setCurrentPlan(plan.id);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Cheaper plan generated')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to generate plan: $e')));
-    }
-  }
-}
+// (Removed duplicate extension _CheaperPlanAction; class method _generateCheaperPlan is used.)
 
 // Formatting helper: cents -> $dollars.xx
 String formatCents(int cents) => '\$' + (cents / 100).toStringAsFixed(2);

@@ -396,31 +396,6 @@ class PantryRepositoryImpl implements PantryRepository {
       orElse: () => Unit.grams,
     );
   }
-}
-
-class _PantryAggregate {
-  _PantryAggregate();
-
-  double totalQty = 0;
-  final Set<String> _units = <String>{};
-
-  void addRow(db.PantryItem row) {
-    totalQty += row.qty;
-    _units.add(row.unit);
-  }
-
-  String get unitName {
-    if (_units.isEmpty) {
-      return 'unknown';
-    }
-    if (_units.length == 1) {
-      return _units.first;
-    }
-    return 'mixed';
-  }
-
-  bool get hasUnitMismatch => _units.length > 1;
-}
 
   @override
   Future<Map<String, ({double qty, Unit unit})>> getOnHand() async {
@@ -501,3 +476,28 @@ class _PantryAggregate {
           );
     });
   }
+}
+
+class _PantryAggregate {
+  _PantryAggregate();
+
+  double totalQty = 0;
+  final Set<String> _units = <String>{};
+
+  void addRow(db.PantryItem row) {
+    totalQty += row.qty;
+    _units.add(row.unit);
+  }
+
+  String get unitName {
+    if (_units.isEmpty) {
+      return 'unknown';
+    }
+    if (_units.length == 1) {
+      return _units.first;
+    }
+    return 'mixed';
+  }
+
+  bool get hasUnitMismatch => _units.length > 1;
+}
