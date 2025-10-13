@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:meta/meta.dart';
 
 import '../../domain/entities/ingredient.dart';
+import 'package:uuid/uuid.dart';
 import '../../domain/entities/pantry_item.dart' as domain;
 import '../../domain/repositories/pantry_repository.dart';
 import '../datasources/database.dart' as db;
@@ -420,3 +421,83 @@ class _PantryAggregate {
 
   bool get hasUnitMismatch => _units.length > 1;
 }
+
+  @override
+  Future<Map<String, ({double qty, Unit unit})>> getOnHand() async {
+    // Aggregate by ingredientId in the ingredient's base unit only.
+    final query = _database.select(_database.pantryItems).join([
+      innerJoin(
+        _database.ingredients,
+        _database.ingredients.id.equalsExp(_database.pantryItems.ingredientId),
+      ),
+    ]);
+
+    final rows = await query.get();
+    final Map<String, ({double qty, Unit unit})> out = {};
+    for (final row in rows) {
+      final p = row.readTable(_database.pantryItems);
+      final ingRow = row.readTable(_database.ingredients);
+      final baseUnit = Unit.values.firstWhere(
+        (u) => u.value == ingRow.unit,
+        orElse: () => Unit.grams,
+      );
+      if (p.unit != ingRow.unit) {
+        // Skip non-base unit rows for conservative total without schema changes.
+        continue;
+      }
+      final prev = out[p.ingredientId];
+      final acc = (prev?.qty ?? 0) + p.qty;
+      out[p.ingredientId] = (qty: acc, unit: baseUnit);
+    }
+    return out;
+  }
+
+  @override
+  Future<int> addOnHandDeltas(
+    List<({String ingredientId, double qty, Unit unit})> deltas,
+  ) async {
+    if (deltas.isEmpty) return 0;
+    final now = DateTime.now();
+    final uuid = const Uuid();
+    await _database.batch((batch) {
+      for (final d in deltas) {
+        batch.insert(
+          _database.pantryItems,
+          db.PantryItemsCompanion(
+            id: Value('pantry_${uuid.v4()}'),
+            ingredientId: Value(d.ingredientId),
+            qty: Value(d.qty),
+            unit: Value(d.unit.value),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+    });
+    return deltas.map((e) => e.ingredientId).toSet().length;
+  }
+
+  @override
+  Future<void> setOnHand({
+    required String ingredientId,
+    required double qty,
+    required Unit unit,
+  }) async {
+    final now = DateTime.now();
+    final uuid = const Uuid();
+    await _database.transaction(() async {
+      await (_database.delete(_database.pantryItems)
+            ..where((t) => t.ingredientId.equals(ingredientId)))
+          .go();
+      await _database.into(_database.pantryItems).insert(
+            db.PantryItemsCompanion(
+              id: Value('pantry_${uuid.v4()}'),
+              ingredientId: Value(ingredientId),
+              qty: Value(qty),
+              unit: Value(unit.value),
+              createdAt: Value(now),
+              updatedAt: Value(now),
+            ),
+          );
+    });
+  }

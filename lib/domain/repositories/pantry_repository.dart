@@ -60,4 +60,19 @@ abstract class PantryRepository {
 
   /// Watch pantry items count (reactive stream)
   Stream<int> watchPantryItemsCount();
+
+  /// Returns on-hand map: ingredientId -> (qty, unit)
+  Future<Map<String, ({double qty, Unit unit})>> getOnHand();
+
+  /// Adds (merges) quantities into on-hand. Units may differ; caller must align.
+  /// Returns a summary: updated ingredientIds count.
+  Future<int> addOnHandDeltas(
+      List<({String ingredientId, double qty, Unit unit})> deltas);
+
+  /// Optional: set absolute on-hand for an ingredient.
+  Future<void> setOnHand({
+    required String ingredientId,
+    required double qty,
+    required Unit unit,
+  });
 }

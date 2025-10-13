@@ -55,6 +55,33 @@ class ShoppingListRepositoryPrefs implements ShoppingListRepository {
       return const [];
     }
   }
+
+  @override
+  Future<List<({String ingredientId, double qty, Unit unit})>> getCheckedItems({
+    String? planId,
+  }) async {
+    // This prefs-backed impl cannot rebuild plan-derived items.
+    // It returns only checked user-added extras that are also checked.
+    if (planId == null) return const [];
+    final checkedKeys = _prefs.getStringList('shopping_checked_$planId')?.toSet() ?? <String>{};
+    if (checkedKeys.isEmpty) return const [];
+
+    final extras = _loadExtras(_key(planId));
+    final out = <({String ingredientId, double qty, Unit unit})>[];
+    for (final e in extras) {
+      final key = _pairKey(e.ingredientId, e.unit);
+      if (checkedKeys.contains(key)) {
+        out.add((ingredientId: e.ingredientId, qty: e.qty, unit: e.unit));
+      }
+    }
+    return out;
+  }
+
+  @override
+  Future<void> clearCheckedItems({String? planId}) async {
+    final key = 'shopping_checked_${planId ?? 'none'}';
+    await _prefs.setStringList(key, <String>[]);
+  }
 }
 
 class _ExtraItem {
@@ -110,4 +137,3 @@ class _ExtraItem {
 }
 
 String _pairKey(String ingredientId, Unit unit) => '$ingredientId|${unit.name}';
-

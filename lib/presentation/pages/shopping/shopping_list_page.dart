@@ -10,6 +10,7 @@ import '../../router/app_router.dart';
 import '../../providers/shopping_list_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../providers/plan_providers.dart';
+import '../../../domain/services/replenish_service.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -142,6 +143,68 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                         )
                         .toList(),
                   ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _checked.isEmpty
+                            ? null
+                            : () async {
+                                final plan = ref.read(currentPlanProvider).asData?.value;
+                                final svc = ref.read(replenishServiceProvider);
+                                final res = await svc.markPurchasedAndReplenish(
+                                  planId: plan?.id,
+                                  clearAfter: true,
+                                );
+                                if (!mounted) return;
+                                if (res.mismatchesKept == 0) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Added ${res.itemsMerged} items to Pantry'),
+                                    ),
+                                  );
+                                } else {
+                                  // Show mismatch details
+                                  // ignore: use_build_context_synchronously
+                                  await showModalBottomSheet(
+                                    context: context,
+                                    builder: (ctx) {
+                                      return SafeArea(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(16),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Some items could not be merged',
+                                                style: Theme.of(ctx).textTheme.titleMedium,
+                                              ),
+                                              const SizedBox(height: 8),
+                                              ...res.mismatchNotes.map((n) => Padding(
+                                                    padding: const EdgeInsets.symmetric(vertical: 4),
+                                                    child: Text(n),
+                                                  )),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }
+                                // Reload checked for plan (it was cleared)
+                                if (_loadedPlanId != null) {
+                                  await _loadCheckedForPlan(_loadedPlanId!);
+                                }
+                              },
+                        child: const Text('Mark Purchased → Replenish Pantry'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Padding(
