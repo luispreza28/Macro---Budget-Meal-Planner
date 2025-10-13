@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:typed_data';
+import 'package:share_plus/share_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -16,6 +19,7 @@ import '../../../domain/entities/user_targets.dart';
 import '../../widgets/plan_widgets/swap_drawer.dart';
 import '../../providers/database_providers.dart';
 import '../../services/export_service.dart';
+import '../../services/export_service.dart' as svc;
 import '../../../domain/entities/ingredient.dart' as ing;
 import '../../../domain/value/shortfall_item.dart';
 
@@ -675,6 +679,65 @@ class _PlanPageState extends ConsumerState<PlanPage> {
               }
             },
             child: const Text('Share as CSV (.csv)'),
+          ),
+          SimpleDialogOption(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              // Small modal progress
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => const Center(child: CircularProgressIndicator()),
+              );
+              try {
+                final now = DateTime.now();
+                final endLocal = DateTime(now.year, now.month, now.day);
+                const tz = 'local'; // persisted TZ not found; default to local
+
+                if (kIsWeb) {
+                  final result = await ref
+                      .read(svc.exportServiceProvider)
+                      .buildLast7DaysZipBytes(
+                        endInclusiveLocal: endLocal,
+                        timezone: tz,
+                      );
+                  await Share.shareXFiles(
+                    [
+                      XFile.fromData(
+                        Uint8List.fromList(result.bytes),
+                        name: result.filename,
+                        mimeType: 'application/zip',
+                      )
+                    ],
+                    text: 'Macro + Budget Meal Planner – Last 7 Days',
+                  );
+                } else {
+                  final path = await ref.read(svc.exportServiceProvider).exportLast7DaysZip(
+                        endInclusiveLocal: endLocal,
+                        timezone: tz,
+                      );
+                  await Share.shareXFiles(
+                    [XFile(path)],
+                    text: 'Macro + Budget Meal Planner – Last 7 Days',
+                  );
+                }
+
+                if (!mounted) return;
+                Navigator.of(context, rootNavigator: true).pop(); // close progress
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Exported last 7 days.')),
+                );
+              } catch (e) {
+                if (!mounted) return;
+                Navigator.of(context, rootNavigator: true).pop(); // close progress
+                // ignore: avoid_print
+                if (kDebugMode) print('[Export] ERROR $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Export failed: $e')),
+                );
+              }
+            },
+            child: const Text('Export Last 7 Days (ZIP)'),
           ),
         ],
       ),
