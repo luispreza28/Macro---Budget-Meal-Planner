@@ -5,6 +5,9 @@ import '../../../domain/entities/plan.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../../domain/entities/ingredient.dart'; // NEW
 import 'meal_card.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/plan_pin_providers.dart';
+import '../../../domain/services/plan_pin_service.dart';
 
 /// 7-day meal plan grid widget
 class WeeklyPlanGrid extends StatelessWidget {
@@ -54,6 +57,7 @@ class WeeklyPlanGrid extends StatelessWidget {
                 selectedMealIndex: selectedMealIndex,
                 dayIndex: dayIndex,
                 ingredientNameById: ingredientNameById,
+                planId: plan.id,
               ),
               if (dayIndex < plan.days.length - 1) const SizedBox(height: 24),
             ],
@@ -137,6 +141,7 @@ class _MealsRow extends StatelessWidget {
     required this.dayIndex,
     this.selectedMealIndex,
     this.ingredientNameById = const {},
+    required this.planId,
   });
 
   final List<PlanMeal> meals;
@@ -146,6 +151,7 @@ class _MealsRow extends StatelessWidget {
   final int? selectedMealIndex;
   final int dayIndex;
   final Map<String, String> ingredientNameById;
+  final String planId;
 
   @override
   Widget build(BuildContext context) {
@@ -200,14 +206,64 @@ class _MealsRow extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: MealCard(
-                    recipe: recipe,
-                    servings: meal.servings,
-                    ingredients: ingredients, // NEW
-                    onTap: () => onMealTap(mealIndex),
-                    isSelected: isSelected,
-                    ingredientNameById: ingredientNameById,
-                    onInfoTap: () => context.push('/recipe/${recipe.id}'),
+                  child: Consumer(
+                    builder: (context, ref, _) {
+                      final pinsAsync = ref.watch(pinsForCurrentPlanProvider);
+                      final pins = pinsAsync.asData?.value ?? const <String, String>{};
+                      final slotKey = 'd${dayIndex}-m${mealIndex}';
+                      final pinned = pins.containsKey(slotKey);
+                      return Stack(
+                        children: [
+                          MealCard(
+                            recipe: recipe,
+                            servings: meal.servings,
+                            ingredients: ingredients, // NEW
+                            onTap: () => onMealTap(mealIndex),
+                            isSelected: isSelected,
+                            ingredientNameById: ingredientNameById,
+                            onInfoTap: () => context.push('/recipe/${recipe.id}'),
+                          ),
+                          // Pin badge
+                          if (pinned)
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.tertiaryContainer,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'PINNED',
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        color: Theme.of(context).colorScheme.onTertiaryContainer,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                              ),
+                            ),
+                          // Pin/unpin button
+                          Positioned(
+                            top: 2,
+                            right: 2,
+                            child: IconButton(
+                              tooltip: pinned ? 'Unpin' : 'Pin',
+                              icon: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined, size: 18),
+                              onPressed: () async {
+                                final svc = ref.read(planPinServiceProvider);
+                                if (pinned) {
+                                  await svc.clearPin(planId: planId, slotKey: slotKey);
+                                } else {
+                                  await svc.setPin(planId: planId, slotKey: slotKey, recipeId: recipe.id);
+                                }
+                                ref.invalidate(pinsForCurrentPlanProvider);
+                              },
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ],

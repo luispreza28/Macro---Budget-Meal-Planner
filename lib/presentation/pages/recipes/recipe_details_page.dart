@@ -15,6 +15,8 @@ import '../../providers/plan_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../../domain/value/shortfall_item.dart';
 import '../../providers/shopping_list_providers.dart';
+import '../../providers/recipe_pref_providers.dart';
+import '../../../domain/services/recipe_prefs_service.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});
@@ -835,7 +837,7 @@ class _InlineError extends StatelessWidget {
   }
 }
 
-class _Header extends StatelessWidget {
+class _Header extends ConsumerWidget {
   const _Header({
     required this.recipe,
     required this.derived,
@@ -847,18 +849,62 @@ class _Header extends StatelessWidget {
   final bool showPreviewBadge;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              recipe.name,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Text(
+                    recipe.name,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                // Favorite toggle
+                Consumer(builder: (context, ref, _) {
+                  final favAsync = ref.watch(isFavoriteProvider(recipe.id));
+                  final isFav = favAsync.asData?.value ?? false;
+                  return IconButton(
+                    tooltip: isFav ? 'Unfavorite' : 'Favorite',
+                    icon: Icon(isFav ? Icons.star : Icons.star_border),
+                    color: isFav ? Colors.amber : null,
+                    onPressed: () async {
+                      final svc = ref.read(recipePrefsServiceProvider);
+                      await svc.toggleFavorite(recipe.id, value: !isFav);
+                      ref.invalidate(favoriteRecipesProvider);
+                      ref.invalidate(isFavoriteProvider(recipe.id));
+                    },
+                  );
+                }),
+                // Exclude toggle
+                Consumer(builder: (context, ref, _) {
+                  final exAsync = ref.watch(isExcludedProvider(recipe.id));
+                  final isExcluded = exAsync.asData?.value ?? false;
+                  return IconButton(
+                    tooltip: isExcluded ? 'Include in suggestions' : 'Exclude from suggestions',
+                    icon: Icon(isExcluded ? Icons.visibility_off : Icons.visibility_off_outlined),
+                    onPressed: () async {
+                      final svc = ref.read(recipePrefsServiceProvider);
+                      final next = !isExcluded;
+                      await svc.toggleExcluded(recipe.id, value: next);
+                      ref.invalidate(excludedRecipesProvider);
+                      ref.invalidate(isExcludedProvider(recipe.id));
+                      if (next) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Excluded from suggestions and generation.')),
+                        );
+                      }
+                    },
+                  );
+                }),
+              ],
             ),
             if (showPreviewBadge) ...[
               const SizedBox(height: 6),

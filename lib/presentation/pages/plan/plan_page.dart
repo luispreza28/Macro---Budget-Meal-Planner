@@ -29,6 +29,8 @@ import '../../providers/shortfall_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../providers/budget_providers.dart';
 import '../../providers/shopping_list_providers.dart';
+import '../../providers/plan_pin_providers.dart';
+import '../../providers/recipe_pref_providers.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -594,6 +596,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       final recipes = await ref.read(allRecipesProvider.future);
       final targets = await ref.read(currentUserTargetsProvider.future);
       final ingredients = await ref.read(allIngredientsProvider.future);
+      final pinnedSlots = await ref.read(pinsForCurrentPlanProvider.future);
+      final excluded = await ref.read(excludedRecipesProvider.future);
+      final favorites = await ref.read(favoriteRecipesProvider.future);
 
       if (targets == null) {
         if (!mounted) return;
@@ -608,6 +613,10 @@ class _PlanPageState extends ConsumerState<PlanPage> {
         targets: targets,
         recipes: recipes,
         ingredients: ingredients,
+        favoriteBias: 0.25,
+        pinnedSlots: pinnedSlots,
+        excludedRecipeIds: excluded,
+        favoriteRecipeIds: favorites,
       );
 
       final notifier = ref.read(planNotifierProvider.notifier);
@@ -832,6 +841,9 @@ class _WeekShortfallsCardState extends ConsumerState<_WeekShortfallsCard> {
       final recipes = await ref.read(allRecipesProvider.future);
       final targets = await ref.read(currentUserTargetsProvider.future);
       final ingredients = await ref.read(allIngredientsProvider.future);
+      final pinnedSlots = await ref.read(pinsForCurrentPlanProvider.future);
+      final excluded = await ref.read(excludedRecipesProvider.future);
+      final favorites = await ref.read(favoriteRecipesProvider.future);
 
       if (targets == null) {
         if (!mounted) return;
@@ -1033,6 +1045,10 @@ extension _CheaperPlanAction on _PlanPageState {
         recipes: recipes,
         ingredients: ingredients,
         costBias: 0.9,
+        favoriteBias: 0.25,
+        pinnedSlots: pinnedSlots,
+        excludedRecipeIds: excluded,
+        favoriteRecipeIds: favorites,
       );
 
       final notifier = ref.read(planNotifierProvider.notifier);

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/recipe.dart';
+import '../../providers/recipe_pref_providers.dart';
 
 /// Bottom drawer for showing meal swap options
-class SwapDrawer extends StatelessWidget {
+class SwapDrawer extends ConsumerStatefulWidget {
   const SwapDrawer({
     super.key,
     required this.currentRecipe,
@@ -40,11 +42,20 @@ class SwapDrawer extends StatelessWidget {
   final bool isLoading;
 
   @override
+  ConsumerState<SwapDrawer> createState() => _SwapDrawerState();
+}
+
+class _SwapDrawerState extends ConsumerState<SwapDrawer> {
+  bool _favoritesOnly = false;
+  bool _hideExcluded = true;
+
+  @override
   Widget build(BuildContext context) {
+    final alternatives = widget.alternatives;
     Widget content;
-    if (isLoading) {
+    if (widget.isLoading) {
       content = const Center(child: CircularProgressIndicator());
-    } else if (errorMessage != null) {
+    } else if (widget.errorMessage != null) {
       content = Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -52,7 +63,7 @@ class SwapDrawer extends StatelessWidget {
             const Icon(Icons.error_outline, size: 36, color: Colors.redAccent),
             const SizedBox(height: 8),
             Text(
-              errorMessage!,
+              widget.errorMessage!,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -64,16 +75,31 @@ class SwapDrawer extends StatelessWidget {
     } else if (alternatives.isEmpty) {
       content = const Center(child: Text('No alternatives available'));
     } else {
+      final favAsync = ref.watch(favoriteRecipesProvider);
+      final exAsync = ref.watch(excludedRecipesProvider);
+      final favs = favAsync.asData?.value ?? const <String>{};
+      final excluded = exAsync.asData?.value ?? const <String>{};
+
+      final filtered = alternatives.where((opt) {
+        final isFav = favs.contains(opt.recipe.id);
+        final isEx = excluded.contains(opt.recipe.id);
+        if (_hideExcluded && isEx) return false;
+        if (_favoritesOnly && !isFav) return false;
+        return true;
+      }).toList(growable: false);
+
       content = ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: alternatives.length,
+        itemCount: filtered.length,
         itemBuilder: (context, index) {
-          final option = alternatives[index];
+          final option = filtered[index];
+          final isFav = favs.contains(option.recipe.id);
           return _SwapOptionCard(
             option: option,
+            isFavorite: isFav,
             onTap: () {
-              onSwapSelected(option.recipe);
-              onClose();
+              widget.onSwapSelected(option.recipe);
+              widget.onClose();
             },
           );
         },
@@ -117,7 +143,7 @@ class SwapDrawer extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Currently: ${currentRecipe.name}',
+                        'Currently: ${widget.currentRecipe.name}',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
@@ -125,11 +151,30 @@ class SwapDrawer extends StatelessWidget {
                     ],
                   ),
                 ),
-                IconButton(onPressed: onClose, icon: const Icon(Icons.close)),
+                IconButton(onPressed: widget.onClose, icon: const Icon(Icons.close)),
               ],
             ),
           ),
-
+          // Filters
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Favorites only'),
+                  selected: _favoritesOnly,
+                  onSelected: (v) => setState(() => _favoritesOnly = v),
+                  avatar: const Icon(Icons.star, size: 16, color: Colors.amber),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Hide excluded'),
+                  selected: _hideExcluded,
+                  onSelected: (v) => setState(() => _hideExcluded = v),
+                ),
+              ],
+            ),
+          ),
           // Alternatives list
           Expanded(child: content),
         ],
@@ -139,10 +184,11 @@ class SwapDrawer extends StatelessWidget {
 }
 
 class _SwapOptionCard extends StatelessWidget {
-  const _SwapOptionCard({required this.option, required this.onTap});
+  const _SwapOptionCard({required this.option, required this.onTap, this.isFavorite = false});
 
   final SwapOption option;
   final VoidCallback onTap;
+  final bool isFavorite;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +205,10 @@ class _SwapOptionCard extends StatelessWidget {
               // Recipe name and basic info
               Row(
                 children: [
+                  if (isFavorite) ...[
+                    const Icon(Icons.star, size: 16, color: Colors.amber),
+                    const SizedBox(width: 6),
+                  ],
                   Expanded(
                     child: Text(
                       option.recipe.name,

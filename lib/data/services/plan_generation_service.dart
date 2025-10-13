@@ -22,6 +22,10 @@ class PlanGenerationService {
     required List<Recipe> recipes,
     required List<Ingredient> ingredients,
     double? costBias,
+    double? favoriteBias, // 0..1; nudge toward favorites
+    Map<String, String>? pinnedSlots, // slotKey -> recipeId
+    Set<String>? excludedRecipeIds, // avoid these recipes entirely
+    Set<String>? favoriteRecipeIds, // optional, used with favoriteBias
   }) async {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
@@ -31,7 +35,9 @@ class PlanGenerationService {
 
     final int mealsPerDay = targets.mealsPerDay.clamp(1, 6) as int;
     final rng = _rng;
-    final all = [...recipes];
+    // Exclude recipes if requested
+    final excluded = excludedRecipeIds ?? const <String>{};
+    final all = [...recipes.where((r) => !excluded.contains(r.id))];
     final itemized = all.where((r) => r.items.isNotEmpty).toList();
     final nonItemized = all.where((r) => r.items.isEmpty).toList();
 
@@ -81,23 +87,34 @@ class PlanGenerationService {
     final pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
       ..shuffle(rng);
 
-    // Optional: nudge selection toward cheaper recipes.
-    if (costBias != null && costBias > 0) {
-      assert(costBias >= 0 && costBias <= 1.0);
-      if (kDebugMode) {
-        debugPrint('[GenCostBias] applying cost bias: $costBias');
-      }
-      // Build a lightweight score that prefers cheaper items.
-      final scores = <String, double>{};
+    // Build a score map to sort candidates with optional biases
+    final scores = <String, double>{};
+    final doCost = costBias != null && costBias > 0;
+    final favs = favoriteRecipeIds ?? const <String>{};
+    final fb = (favoriteBias ?? 0).clamp(0.0, 1.0);
+    if (doCost && kDebugMode) {
+      debugPrint('[GenCostBias] applying cost bias: $costBias');
+    }
+    if (fb > 0 && kDebugMode) {
+      debugPrint('[GenBias] applying favorite bias: $fb (favs=${favs.length})');
+    }
+    if (doCost || fb > 0) {
       for (final r in pool) {
-        final cents = r.costPerServCents.clamp(0, 2000);
-        final normalized = cents / 2000.0; // 0..1
-        final penalty = (costBias) * normalized; // 0..1
         final base = rng.nextDouble();
-        final score = base - penalty; // lower => cheaper preferred
+        double score = base;
+        if (doCost) {
+          final cents = r.costPerServCents.clamp(0, 2000);
+          final normalized = cents / 2000.0; // 0..1
+          final penalty = (costBias!) * normalized; // 0..1
+          score -= penalty; // lower => cheaper preferred
+        }
+        if (fb > 0) {
+          final isFav = favs.contains(r.id) ? 1.0 : 0.0;
+          score += fb * isFav;
+        }
         scores[r.id] = score;
       }
-      pool.sort((a, b) => (scores[a.id]!).compareTo(scores[b.id]!));
+      pool.sort((a, b) => (scores[b.id]!).compareTo(scores[a.id]!)); // higher score first
     }
 
     while (pool.length < mealsNeeded) {
@@ -142,12 +159,28 @@ class PlanGenerationService {
       return fallback;
     }
 
+    final pins = pinnedSlots ?? const <String, String>{};
     for (int d = 0; d < 7; d++) {
       final List<PlanMeal> meals = [];
       final usedThisDay = <String>{};
 
       for (int m = 0; m < mealsPerDay; m++) {
-        final recipe = _pickWithNoImmediateRepeat(usedThisDay);
+        final slotKey = 'd${d}-m${m}';
+        Recipe recipe;
+        final pinnedId = pins[slotKey];
+        if (pinnedId != null) {
+          // Use pinned recipe if available in our candidate set
+          final pinned = recipes.firstWhere(
+            (r) => r.id == pinnedId,
+            orElse: () => pool.first,
+          );
+          recipe = pinned;
+          if (kDebugMode) {
+            debugPrint('[GenBias] pinned slot $slotKey -> ${pinned.id}');
+          }
+        } else {
+          recipe = _pickWithNoImmediateRepeat(usedThisDay);
+        }
         usedThisDay.add(recipe.id);
         lastPicked = recipe;
 
