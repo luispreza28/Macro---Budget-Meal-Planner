@@ -434,3 +434,20 @@ class Ingredient extends Equatable {
     mlPerPiece,
   ];
 }
+
+extension IngredientPieceHelpers on Ingredient {
+  bool get hasPerPieceOverride =>
+      (nutritionPerPieceKcal ?? 0) > 0 ||
+      (nutritionPerPieceProteinG ?? 0) > 0 ||
+      (nutritionPerPieceCarbsG ?? 0) > 0 ||
+      (nutritionPerPieceFatG ?? 0) > 0;
+
+  NutritionPer100? get perPieceAsNutrition => hasPerPieceOverride
+      ? NutritionPer100(
+          kcal: nutritionPerPieceKcal ?? 0,
+          proteinG: nutritionPerPieceProteinG ?? 0,
+          carbsG: nutritionPerPieceCarbsG ?? 0,
+          fatG: nutritionPerPieceFatG ?? 0,
+        )
+      : null;
+}

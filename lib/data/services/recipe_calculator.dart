@@ -78,7 +78,10 @@ class RecipeCalculator {
     }
 
     // --- nutrition ---
-    final per100 = ing.per100;
+    // Prefer per-piece overrides for piece-based ingredients when present
+    final per100 = (ing.unit == Unit.piece && ing.perPieceAsNutrition != null)
+        ? ing.perPieceAsNutrition
+        : ing.per100;
     if (per100 == null) {
       debugPrint('[RecipeCalc]    macros: MISSING for "${ing.name}"');
       acc.missing = true;
