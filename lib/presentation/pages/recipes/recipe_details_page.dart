@@ -204,6 +204,12 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
                                                 ).colorScheme.error,
                                               ),
                                         ),
+                                      if (ingredient != null)
+                                        _ConversionHint(
+                                          itemUnit: item.unit,
+                                          baseUnit: ingredient.unit,
+                                          density: ingredient.densityGPerMl,
+                                        ),
                                     ],
                                   ),
                                 ),
@@ -608,6 +614,44 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
         return 'ml';
       case domain.Unit.piece:
         return 'pc';
+    }
+  }
+}
+
+class _ConversionHint extends StatelessWidget {
+  const _ConversionHint({
+    required this.itemUnit,
+    required this.baseUnit,
+    required this.density,
+  });
+  final domain.Unit itemUnit;
+  final domain.Unit baseUnit;
+  final double? density;
+
+  @override
+  Widget build(BuildContext context) {
+    final involvesMassVol =
+        (itemUnit == domain.Unit.grams && baseUnit == domain.Unit.milliliters) ||
+        (itemUnit == domain.Unit.milliliters && baseUnit == domain.Unit.grams);
+    if (!involvesMassVol) return const SizedBox.shrink();
+    final textTheme = Theme.of(context).textTheme;
+    final onVar = Theme.of(context).colorScheme.onSurfaceVariant;
+    if (density != null && density! > 0) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+          'Converted with density (g↔ml)',
+          style: textTheme.labelSmall?.copyWith(color: onVar),
+        ),
+      );
+    } else {
+      return Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text(
+          'No density set; cannot convert g↔ml',
+          style: textTheme.labelSmall?.copyWith(color: onVar),
+        ),
+      );
     }
   }
 }

@@ -70,8 +70,7 @@ class RecipeCalculator {
       acc.missing = true;
       return;
     }
-
-    final double qtyBase = _toBaseUnit(qty: it.qty, from: it.unit, to: ing.unit);
+    final double qtyBase = _toBaseUnit(qty: it.qty, from: it.unit, to: ing.unit, ingredient: ing);
     if (kDebugMode) {
       debugPrint('[RecipeCalc]  ITEM id=${it.ingredientId} name="${ing.name}" '
           'qtyRaw=${it.qty} ${it.unit} -> qtyBase=$qtyBase ${ing.unit}');
@@ -129,14 +128,29 @@ class RecipeCalculator {
     required double qty,
     required Unit from,
     required Unit to,
+    required Ingredient ingredient,
   }) {
     if (from == to) return qty;
 
     // grams <-> ml: don’t convert without density; return as-is (log it)
     if ((from == Unit.grams && to == Unit.milliliters) ||
         (from == Unit.milliliters && to == Unit.grams)) {
-      debugPrint('[RecipeCalc]    WARN: grams<->ml conversion skipped (no density). qty kept=$qty');
-      return qty;
+      final d = ingredient.densityGPerMl;
+      if (d != null && d > 0) {
+        final toQty = (from == Unit.grams && to == Unit.milliliters)
+            ? (qty / d)
+            : (qty * d);
+        if (kDebugMode) {
+          debugPrint('[RecipeCalc]    CONVERT g↔ml using density=${d.toStringAsFixed(3)} : '
+              '${qty.toStringAsFixed(2)}${from.name} -> ${toQty.toStringAsFixed(2)}${to.name}');
+        }
+        return toQty;
+      } else {
+        if (kDebugMode) {
+          debugPrint('[RecipeCalc]    WARN: grams<->ml conversion skipped (no density). qty kept=$qty');
+        }
+        return qty;
+      }
     }
 
     // piece <-> weight/volume: no mapping; return as-is (log it)

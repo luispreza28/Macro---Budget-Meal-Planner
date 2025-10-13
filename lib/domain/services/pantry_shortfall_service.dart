@@ -152,9 +152,19 @@ class PantryShortfallService {
               double availableInReqUnit = 0.0;
               onHandUnits.forEach((u, qty) {
                 if (u == Unit.grams && reqUnit == Unit.milliliters) {
-                  availableInReqUnit += _gramsToMl(qty, density);
+                  final converted = _gramsToMl(qty, density);
+                  if (kDebugMode) {
+                    debugPrint('[Shortfall] CONVERT g↔ml using density=${density.toStringAsFixed(3)} : '
+                        'onHand ${qty.toStringAsFixed(2)} ${u.name} -> ${converted.toStringAsFixed(2)} ${reqUnit.name}');
+                  }
+                  availableInReqUnit += converted;
                 } else if (u == Unit.milliliters && reqUnit == Unit.grams) {
-                  availableInReqUnit += _mlToGrams(qty, density);
+                  final converted = _mlToGrams(qty, density);
+                  if (kDebugMode) {
+                    debugPrint('[Shortfall] CONVERT g↔ml using density=${density.toStringAsFixed(3)} : '
+                        'onHand ${qty.toStringAsFixed(2)} ${u.name} -> ${converted.toStringAsFixed(2)} ${reqUnit.name}');
+                  }
+                  availableInReqUnit += converted;
                 }
               });
               missingQty = (reqQty - availableInReqUnit).clamp(0.0, double.infinity);
@@ -191,4 +201,3 @@ class PantryShortfallService {
   double _mlToGrams(double qty, double densityGPerMl) => qty * densityGPerMl;
   double _gramsToMl(double qty, double densityGPerMl) => qty / densityGPerMl;
 }
-

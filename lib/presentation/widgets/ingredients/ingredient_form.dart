@@ -26,6 +26,8 @@ class _IngredientFormState extends State<IngredientForm> {
   late final TextEditingController _fatPiece;
   late final TextEditingController _gPerPiece;
   late final TextEditingController _mlPerPiece;
+  late final TextEditingController _densityGPerMl;
+  static const double _maxDensity = 3.0;
 
   @override
   void initState() {
@@ -36,6 +38,7 @@ class _IngredientFormState extends State<IngredientForm> {
     _fatPiece = TextEditingController(text: _fmt(widget.ingredient.nutritionPerPieceFatG));
     _gPerPiece = TextEditingController(text: _fmt(widget.ingredient.gramsPerPiece));
     _mlPerPiece = TextEditingController(text: _fmt(widget.ingredient.mlPerPiece));
+    _densityGPerMl = TextEditingController(text: _fmt(widget.ingredient.densityGPerMl));
   }
 
   @override
@@ -46,6 +49,7 @@ class _IngredientFormState extends State<IngredientForm> {
     _fatPiece.dispose();
     _gPerPiece.dispose();
     _mlPerPiece.dispose();
+    _densityGPerMl.dispose();
     super.dispose();
   }
 
@@ -96,6 +100,39 @@ class _IngredientFormState extends State<IngredientForm> {
               ),
               const SizedBox(height: 12),
               _ReadOnlyMacrosTile(title: 'Current per 100', m: ing.macrosPer100g),
+              const SizedBox(height: 12),
+              _numberField(
+                _densityGPerMl,
+                label: 'Density (g per ml)',
+                allowEmpty: true,
+                helperText: 'Used to convert grams↔milliliters for this ingredient only.',
+                validator: (t) {
+                  final v = t?.trim() ?? '';
+                  if (v.isEmpty) return null; // optional
+                  final d = double.tryParse(v);
+                  if (d == null) return 'Enter a number';
+                  if (d <= 0) return 'Must be > 0';
+                  if (d > _maxDensity) return 'Unreasonably high (> $_maxDensity)';
+                  return null;
+                },
+              ),
+              if (ing.unit == Unit.grams || ing.unit == Unit.milliliters)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.tertiary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'With density set, we can convert g↔ml in recipes and shortfalls.',
+                          style: Theme.of(context).textTheme.labelMedium?.copyWith(color: onSurfaceVar),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ] else ...[
               Text(
                 'Used when counting pieces. Factor = pieces.',
@@ -191,6 +228,19 @@ class _IngredientFormState extends State<IngredientForm> {
       );
     }
 
+    // Density: optional, validated above when provided
+    double? _parseDensity(String s) {
+      final t = s.trim();
+      if (t.isEmpty) return null;
+      final d = double.tryParse(t);
+      if (d == null) return null;
+      if (d <= 0 || d > _maxDensity) return null; // guard double-validate
+      return d;
+    }
+    updated = updated.copyWith(
+      densityGPerMl: () => _parseDensity(_densityGPerMl.text),
+    );
+
     await widget.onSubmit(updated);
   }
 
@@ -198,6 +248,8 @@ class _IngredientFormState extends State<IngredientForm> {
     TextEditingController controller, {
     required String label,
     bool allowEmpty = false,
+    String? helperText,
+    String? Function(String?)? validator,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -207,15 +259,14 @@ class _IngredientFormState extends State<IngredientForm> {
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
-          helperText: allowEmpty ? 'Optional' : null,
+          helperText: helperText ?? (allowEmpty ? 'Optional' : null),
         ),
-        validator: (v) {
+        validator: validator ?? (v) {
           final t = v?.trim() ?? '';
           if (t.isEmpty) return allowEmpty ? null : 'Required';
           final d = double.tryParse(t);
           if (d == null) return 'Enter a number';
           if (d < 0) return 'Must be ≥ 0';
-          // one decimal allowed → validate via toStringAsFixed(1) len? (skip enforcing strictly)
           return null;
         },
       ),
@@ -258,4 +309,3 @@ class _ReadOnlyMacrosTile extends StatelessWidget {
     );
   }
 }
-
