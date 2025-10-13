@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../domain/entities/recipe.dart';
-import '../../../domain/entities/ingredient.dart'; // Unit & Ingredient here
+import '../../../domain/entities/ingredient.dart'; // Unit & Ingredient here\r\n\r\nconst bool kShowPantryBadges = false; // gate pantry badges
 
 /// Card displaying a meal in the plan grid
 class MealCard extends StatelessWidget {
@@ -424,3 +424,4 @@ class _SimpleSheetMessage extends StatelessWidget {
     );
   }
 }
+

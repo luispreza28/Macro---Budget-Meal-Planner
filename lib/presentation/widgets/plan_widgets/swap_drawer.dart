@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_features.dart';
+import '../../../domain/services/pantry_utilization_service.dart';
+import '../../providers/ingredient_providers.dart';
 import '../../../domain/services/variety_prefs_service.dart';
 
 /// Bottom drawer for showing meal swap options
@@ -47,7 +49,7 @@ class SwapDrawer extends ConsumerStatefulWidget {
   ConsumerState<SwapDrawer> createState() => _SwapDrawerState();
 }
 
-class _SwapDrawerState extends ConsumerState<SwapDrawer> {
+class _SwapDrawerState extends ConsumerState<SwapDrawer> {\r\n  bool _pantryFirst = true;\r\n  bool _computingPantry = false;\r\n  final Map<String, PantryUtilization> _utilCache = {};
   bool _favoritesOnly = false;
   bool _hideExcluded = true;
   bool _avoidRepetition = true; // mirrors prefs (default ON)
@@ -67,6 +69,29 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
   @override
   Widget build(BuildContext context) {
     final alternatives = widget.alternatives;
+
+    // Precompute pantry utilization lazily for visible candidates
+    Future<void> _ensurePantry() async {
+      if (_computingPantry) return;
+      _computingPantry = true;
+      try {
+        final ings = await ref.read(allIngredientsProvider.future);
+        final ingById = {for (final i in ings) i.id: i};
+        final svc = ref.read(pantryUtilizationServiceProvider);
+        for (final opt in alternatives) {
+          final id = opt.recipe.id;
+          if (_utilCache.containsKey(id)) continue;
+          final util = await svc.scoreRecipePantryUse(opt.recipe, ingredientsById: ingById);
+          _utilCache[id] = util;
+        }
+        if (mounted) setState(() {});
+      } catch (_) {} finally {
+        _computingPantry = false;
+      }
+    }
+    // Kick off once per build if needed
+    if (_pantryFirst) { _ensurePantry(); }
+
     Widget content;
     if (widget.isLoading) {
       content = const Center(child: CircularProgressIndicator());
@@ -118,12 +143,26 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
         filtered = [...filtered]..sort((a, b) => score(b).compareTo(score(a)));
       }
 
+      // Optionally sort by pantry coverage (desc), tiebreak by existing order
+      List<SwapOption> toShow = filtered;
+      if (_pantryFirst && _utilCache.isNotEmpty) {
+        final order = {for (var i=0;i<filtered.length;i++) filtered[i].recipe.id: i};
+        toShow = [...filtered]..sort((a,b) {
+          final ca = _utilCache[a.recipe.id]?.coverageRatio ?? 0.0;
+          final cb = _utilCache[b.recipe.id]?.coverageRatio ?? 0.0;
+          final cmp = cb.compareTo(ca);
+          if (cmp != 0) return cmp;
+          return (order[a.recipe.id] ?? 0).compareTo(order[b.recipe.id] ?? 0);
+        });
+      }
+
       content = ListView.builder(
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: filtered.length,
+        itemCount: toShow.length,
         itemBuilder: (context, index) {
-          final option = filtered[index];
+          final option = toShow[index];
           final isFav = favs.contains(option.recipe.id);
+          final util = _utilCache[option.recipe.id];
           return _SwapOptionCard(
             option: option,
             isFavorite: isFav,
@@ -206,7 +245,7 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                 FilterChip(
                   label: const Text('Avoid repetition'),
                   selected: _avoidRepetition,
-                  onSelected: (v) => setState(() => _avoidRepetition = v),
+                  onSelected: (v) => setState(() => _avoidRepetition = v),\r\n                ),\r\n                const SizedBox(width: 8),\r\n                FilterChip(\r\n                  label: const Text('Pantry-first'),\r\n                  selected: _pantryFirst,\r\n                  onSelected: (v) => setState(() => _pantryFirst = v),
                 ),
               ],
             ),
@@ -220,11 +259,14 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
 }
 
 class _SwapOptionCard extends StatelessWidget {
-  const _SwapOptionCard({required this.option, required this.onTap, this.isFavorite = false});
+  final PantryUtilization? pantryUtil;
+
+  const _SwapOptionCard({required this.option, required this.onTap, this.isFavorite = false, this.pantryUtil});
 
   final SwapOption option;
   final VoidCallback onTap;
   final bool isFavorite;
+  final PantryUtilization? pantryUtil;
 
   @override
   Widget build(BuildContext context) {
@@ -479,3 +521,15 @@ enum SwapReasonType {
 }
 
 void _noRecipe(Recipe _) {}
+
+
+
+
+
+
+
+
+
+
+
+

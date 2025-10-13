@@ -87,7 +87,7 @@ final seedDataServiceProvider = Provider<SeedDataService>((ref) {
 
 /// Provider for a very simple plan generation service
 final planGenerationServiceProvider = Provider<PlanGenerationService>((ref) {
-  return PlanGenerationService();
+  return PlanGenerationService(ref: ref);
 });
 
 final recommendationServiceProvider = Provider<RecommendationService>((ref) {

@@ -1,6 +1,8 @@
 // lib/data/services/plan_generation_service.dart
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../domain/services/pantry_utilization_service.dart';
 
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
@@ -11,10 +13,9 @@ import '../../domain/services/variety_options.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
 /// Falls back to Recipe.macrosPerServ and costPerServCents if items are missing.
-class PlanGenerationService {
-  PlanGenerationService({Random? rng}) : _rng = rng ?? Random();
+class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}) : _rng = rng ?? Random(), _ref = ref;
 
-  final Random _rng;
+  final Random _rng;\r\n\r\n  final Ref\? _ref;\r\n\r\n  double _pantryBias = 0.0;\r\n  Map<String, double>\? _coverageMap;
 
   /// Generates a weekly plan from inputs.
   /// NOTE: This method is pure and **does not persist** the plan. Callers are
@@ -29,12 +30,12 @@ class PlanGenerationService {
     Set<String>? excludedRecipeIds, // avoid these recipes entirely
     Set<String>? favoriteRecipeIds, // optional, used with favoriteBias
     VarietyOptions? varietyOptions,
-  }) async {
+  , double? pantryBias, Map<String, Ingredient>? ingredientsById,}) async {
     if (recipes.isEmpty) {
       throw StateError('No recipes available to generate a plan.');
     }
 
-    final ingById = {for (final i in ingredients) i.id: i};
+    final ingById = ingredientsById ?? {for (final i in ingredients) i.id: i};
 
     final int mealsPerDay = targets.mealsPerDay.clamp(1, 6) as int;
     final rng = _rng;
@@ -432,3 +433,10 @@ class _Totals {
     required this.costCents,
   });
 }
+
+
+
+
+
+
+
