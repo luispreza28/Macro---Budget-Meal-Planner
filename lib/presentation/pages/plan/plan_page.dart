@@ -138,6 +138,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
             tooltip: 'Shopping List',
           ),
           IconButton(
+            onPressed: () => context.go(AppRouter.insights),
+            icon: const Icon(Icons.insights_outlined),
+            tooltip: 'Insights',
+          ),
+          IconButton(
             onPressed: () async {
               await _generateNewPlan();
             },
