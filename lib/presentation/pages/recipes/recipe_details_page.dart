@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/entities/ingredient.dart' as domain;
@@ -17,6 +18,7 @@ import '../../../domain/value/shortfall_item.dart';
 import '../../providers/shopping_list_providers.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_prefs_service.dart';
+import '../../providers/clipboard_providers.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});
@@ -43,15 +45,60 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
   List<String> _missingLines = [];
   bool _addingShortfalls = false;
 
+  // Multi-select state
+  bool _multiSelectMode = false;
+  final Set<int> _selectedIndexes = <int>{};
+
   @override
   Widget build(BuildContext context) {
     final recipeAsync = ref.watch(recipeByIdProvider(widget.recipeId));
     final ingredientsAsync = ref.watch(allIngredientsProvider);
 
+    final clipboardItems = ref.watch(recipeItemsClipboardProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Recipe Details'),
         actions: [
+          // Paste button available when clipboard has items
+          if (clipboardItems != null && clipboardItems.isNotEmpty)
+            IconButton(
+              tooltip: 'Paste items',
+              icon: const Icon(Icons.paste),
+              onPressed: () {
+                final draft = _draft;
+                if (draft == null) return;
+                final byId = _ingById;
+                final updated = _pasteClipboard(draft, byId, clipboardItems);
+                _applyDraft(updated, byId);
+              },
+            ),
+          if (!_multiSelectMode) ...[
+            IconButton(
+              tooltip: 'Select',
+              icon: const Icon(Icons.checklist),
+              onPressed: () {
+                setState(() {
+                  _multiSelectMode = true;
+                  _selectedIndexes.clear();
+                });
+              },
+            ),
+            IconButton(
+              tooltip: 'Save as New',
+              icon: const Icon(Icons.copy_all),
+              onPressed: () => _onSaveAsNew(),
+            ),
+          ] else ...[
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _multiSelectMode = false;
+                  _selectedIndexes.clear();
+                });
+              },
+              child: const Text('Cancel'),
+            ),
+          ],
           IconButton(
             tooltip: 'Save',
             icon: const Icon(Icons.save),
@@ -161,129 +208,129 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
                     ),
                     const SizedBox(height: 8),
                     Card(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: draft.items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final item = draft.items[index];
-                          final ingredient = byId[item.ingredientId];
-                          final ingredientName =
-                              ingredient?.name ?? item.ingredientId;
+                      child: _multiSelectMode
+                          ? ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: draft.items.length,
+                              separatorBuilder: (_, __) => const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final item = draft.items[index];
+                                final ingredient = byId[item.ingredientId];
+                                final ingredientName = ingredient?.name ?? item.ingredientId;
 
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                final selected = _selectedIndexes.contains(index);
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
-                                      Text(
-                                        ingredientName,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyLarge
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                            ),
+                                      Checkbox(
+                                        value: selected,
+                                        onChanged: (_) {
+                                          setState(() {
+                                            if (selected) {
+                                              _selectedIndexes.remove(index);
+                                            } else {
+                                              _selectedIndexes.add(index);
+                                            }
+                                          });
+                                        },
                                       ),
-                                      if (ingredient == null)
-                                        Text(
-                                          'Ingredient not found',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                color: Theme.of(
-                                                  context,
-                                                ).colorScheme.error,
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              ingredientName,
+                                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                            ),
+                                            if (ingredient == null)
+                                              Text(
+                                                'Ingredient not found',
+                                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                      color: Theme.of(context).colorScheme.error,
+                                                    ),
                                               ),
+                                            if (ingredient != null)
+                                              _ConversionHint(
+                                                itemUnit: item.unit,
+                                                baseUnit: ingredient.unit,
+                                                density: ingredient.densityGPerMl,
+                                              ),
+                                          ],
                                         ),
-                                      if (ingredient != null)
-                                        _ConversionHint(
-                                          itemUnit: item.unit,
-                                          baseUnit: ingredient.unit,
-                                          density: ingredient.densityGPerMl,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      SizedBox(
+                                        width: 80,
+                                        child: TextFormField(
+                                          key: ValueKey('${item.ingredientId}_qty'),
+                                          initialValue: _formatNumber(item.qty, decimals: 2),
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          decoration: const InputDecoration(labelText: 'Qty', isDense: true),
+                                          onChanged: (value) {
+                                            final parsed = double.tryParse(value.trim());
+                                            if (parsed == null || parsed <= 0) {
+                                              return;
+                                            }
+                                            _replaceItem(
+                                              index: index,
+                                              updated: item.copyWith(qty: parsed),
+                                              ingredientById: byId,
+                                            );
+                                          },
                                         ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      DropdownButton<domain.Unit>(
+                                        value: item.unit,
+                                        onChanged: (selectedUnit) {
+                                          if (selectedUnit == null) return;
+                                          _replaceItem(
+                                            index: index,
+                                            updated: item.copyWith(unit: selectedUnit),
+                                            ingredientById: byId,
+                                          );
+                                        },
+                                        items: domain.Unit.values
+                                            .map((unit) => DropdownMenuItem(value: unit, child: Text(_unitLabel(unit))))
+                                            .toList(),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Remove',
+                                        icon: const Icon(Icons.delete_outline),
+                                        onPressed: () {
+                                          _removeItem(index: index, ingredientById: byId);
+                                        },
+                                      ),
                                     ],
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                SizedBox(
-                                  width: 80,
-                                  child: TextFormField(
-                                    key: ValueKey('${item.ingredientId}_qty'),
-                                    initialValue: _formatNumber(
-                                      item.qty,
-                                      decimals: 2,
-                                    ),
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                          decimal: true,
-                                        ),
-                                    decoration: const InputDecoration(
-                                      labelText: 'Qty',
-                                      isDense: true,
-                                    ),
-                                    onChanged: (value) {
-                                      final parsed = double.tryParse(
-                                        value.trim(),
-                                      );
-                                      if (parsed == null || parsed <= 0) {
-                                        return;
-                                      }
-                                    _replaceItem(
-                                      index: index,
-                                      updated: item.copyWith(qty: parsed),
-                                      ingredientById: byId,
-                                    );
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                DropdownButton<domain.Unit>(
-                                  value: item.unit,
-                                  onChanged: (selectedUnit) {
-                                    if (selectedUnit == null) return;
-                                    _replaceItem(
-                                      index: index,
-                                      updated: item.copyWith(
-                                        unit: selectedUnit,
-                                      ),
-                                      ingredientById: byId,
-                                    );
-                                  },
-                                  items: domain.Unit.values
-                                      .map(
-                                        (unit) => DropdownMenuItem(
-                                          value: unit,
-                                          child: Text(_unitLabel(unit)),
-                                        ),
-                                      )
-                                      .toList(),
-                                ),
-                                IconButton(
-                                  tooltip: 'Remove',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () {
-                                    _removeItem(
-                                      index: index,
-                                      ingredientById: byId,
-                                    );
-                                  },
-                                ),
-                              ],
+                                );
+                              },
+                            )
+                          : _ReorderableItemsList(
+                              items: draft.items,
+                              byId: byId,
+                              onChanged: (index, updated) => _replaceItem(
+                                index: index,
+                                updated: updated,
+                                ingredientById: byId,
+                              ),
+                              onRemove: (index) => _removeItem(index: index, ingredientById: byId),
+                              onReorder: (oldIndex, newIndex) {
+                                final newItems = List<RecipeItem>.from(draft.items);
+                                if (newIndex > oldIndex) newIndex -= 1;
+                                final moved = newItems.removeAt(oldIndex);
+                                newItems.insert(newIndex, moved);
+                                if (kDebugMode) {
+                                  debugPrint('[BulkEdit] reorder old=$oldIndex new=$newIndex');
+                                }
+                                _applyDraft(draft.copyWith(items: newItems), byId);
+                              },
                             ),
-                          );
-                        },
-                      ),
                     ),
                     const SizedBox(height: 20),
                   _AddItemSection(
@@ -345,6 +392,55 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
           );
         },
       ),
+      bottomNavigationBar: _multiSelectMode
+          ? _BulkToolbar(
+              enabled: _selectedIndexes.isNotEmpty,
+              onScale: (pct) {
+                final draft = _draft;
+                if (draft == null) return;
+                final updated = _bulkScale(draft, _ingById, pct);
+                _applyDraft(updated, _ingById);
+              },
+              onScaleCustom: () async {
+                final pct = await _showCustomScaleDialog(context);
+                if (pct == null) return;
+                final draft = _draft;
+                if (draft == null) return;
+                final updated = _bulkScale(draft, _ingById, pct);
+                _applyDraft(updated, _ingById);
+              },
+              onChangeUnit: (unit) {
+                final draft = _draft;
+                if (draft == null) return;
+                final before = draft.items.length;
+                final updated = _bulkChangeUnit(draft, _ingById, unit);
+                final after = updated.items.length;
+                if (!mounted) return;
+                _applyDraft(updated, _ingById);
+                // Skipped count tracked via snack from helper
+              },
+              onDelete: () {
+                final draft = _draft;
+                if (draft == null) return;
+                final updated = _bulkDelete(draft);
+                _applyDraft(updated, _ingById);
+              },
+              onCopy: () {
+                final draft = _draft;
+                if (draft == null) return;
+                final sel = _selectedSorted();
+                final items = sel.map((i) => draft.items[i]).toList(growable: false);
+                ref.read(recipeItemsClipboardProvider.notifier).state = items;
+                setState(() {
+                  _multiSelectMode = false;
+                  _selectedIndexes.clear();
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Copied ${items.length} item(s)')),
+                );
+              },
+            )
+          : null,
     );
   }
 
@@ -454,7 +550,11 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
     );
 
     final notifier = ref.read(recipeNotifierProvider.notifier);
-    await notifier.updateRecipe(updatedRecipe);
+    if (draft.id != original.id) {
+      await notifier.addRecipe(updatedRecipe);
+    } else {
+      await notifier.updateRecipe(updatedRecipe);
+    }
 
     if (!mounted) return;
     setState(() {
@@ -467,6 +567,46 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
       context,
     ).showSnackBar(const SnackBar(content: Text('Recipe updated')));
     Navigator.of(context).pop();
+  }
+
+  void _onSaveAsNew() {
+    final original = _original;
+    final draft = _draft;
+    final byId = _ingById;
+    if (draft == null) return;
+    final newId = const Uuid().v4();
+    final duplicate = draft.copyWith(
+      id: newId,
+      name: '${draft.name} (copy)',
+    );
+    final totals = RecipeCalculator.compute(
+      recipe: duplicate,
+      ingredientsById: byId,
+      debug: true,
+    );
+    final withPreview = duplicate.copyWith(
+      macrosPerServ: duplicate.macrosPerServ.copyWith(
+        kcal: totals.kcalPerServ,
+        proteinG: totals.proteinGPerServ,
+        carbsG: totals.carbsGPerServ,
+        fatG: totals.fatGPerServ,
+      ),
+      costPerServCents: totals.costCentsPerServ,
+    );
+    if (kDebugMode) {
+      debugPrint('[BulkEdit] duplicate id=$newId');
+    }
+    setState(() {
+      _draft = withPreview;
+      _preview = RecipeDerived(
+        kcalPerServ: totals.kcalPerServ,
+        proteinGPerServ: totals.proteinGPerServ,
+        carbsGPerServ: totals.carbsGPerServ,
+        fatGPerServ: totals.fatGPerServ,
+        costPerServCents: totals.costCentsPerServ,
+      );
+      _hasUnsavedChanges = true;
+    });
   }
 
   void _applyDraft(
@@ -617,6 +757,397 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
       case domain.Unit.piece:
         return 'pc';
     }
+  }
+}
+
+// Reorderable items list used when not in multi-select mode
+class _ReorderableItemsList extends StatelessWidget {
+  const _ReorderableItemsList({
+    required this.items,
+    required this.byId,
+    required this.onChanged,
+    required this.onRemove,
+    required this.onReorder,
+  });
+
+  final List<RecipeItem> items;
+  final Map<String, domain.Ingredient> byId;
+  final void Function(int index, RecipeItem updated) onChanged;
+  final void Function(int index) onRemove;
+  final void Function(int oldIndex, int newIndex) onReorder;
+
+  String _unitLabel(domain.Unit unit) {
+    switch (unit) {
+      case domain.Unit.grams:
+        return 'g';
+      case domain.Unit.milliliters:
+        return 'ml';
+      case domain.Unit.piece:
+        return 'pc';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Estimated row height for a bounded box within a scroll view
+    final estHeight = (items.length * 64.0).clamp(64.0, 420.0);
+    return SizedBox(
+      height: estHeight,
+      child: ReorderableListView.builder(
+        buildDefaultDragHandles: true,
+        itemCount: items.length,
+        onReorder: onReorder,
+        itemBuilder: (context, index) {
+          final item = items[index];
+          final ingredient = byId[item.ingredientId];
+          final ingredientName = ingredient?.name ?? item.ingredientId;
+          return Container(
+            key: ValueKey('${item.ingredientId}-$index'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        ingredientName,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      if (ingredient == null)
+                        Text(
+                          'Ingredient not found',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Theme.of(context).colorScheme.error),
+                        ),
+                      if (ingredient != null)
+                        _ConversionHint(
+                          itemUnit: item.unit,
+                          baseUnit: ingredient.unit,
+                          density: ingredient.densityGPerMl,
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 80,
+                  child: TextFormField(
+                    key: ValueKey('${item.ingredientId}_qty'),
+                    initialValue: _formatNumber(item.qty, decimals: 2),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Qty', isDense: true),
+                    onChanged: (value) {
+                      final parsed = double.tryParse(value.trim());
+                      if (parsed == null || parsed <= 0) {
+                        return;
+                      }
+                      onChanged(index, item.copyWith(qty: parsed));
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                DropdownButton<domain.Unit>(
+                  value: item.unit,
+                  onChanged: (selectedUnit) {
+                    if (selectedUnit == null) return;
+                    onChanged(index, item.copyWith(unit: selectedUnit));
+                  },
+                  items: domain.Unit.values
+                      .map((unit) => DropdownMenuItem(value: unit, child: Text(_unitLabel(unit))))
+                      .toList(),
+                ),
+                IconButton(
+                  tooltip: 'Remove',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => onRemove(index),
+                ),
+                const Icon(Icons.drag_handle),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _BulkToolbar extends StatefulWidget {
+  const _BulkToolbar({
+    required this.enabled,
+    required this.onScale,
+    required this.onScaleCustom,
+    required this.onChangeUnit,
+    required this.onDelete,
+    required this.onCopy,
+  });
+
+  final bool enabled;
+  final void Function(double pct) onScale;
+  final Future<void> Function() onScaleCustom;
+  final void Function(domain.Unit unit) onChangeUnit;
+  final VoidCallback onDelete;
+  final VoidCallback onCopy;
+
+  @override
+  State<_BulkToolbar> createState() => _BulkToolbarState();
+}
+
+class _BulkToolbarState extends State<_BulkToolbar> {
+  domain.Unit _unit = domain.Unit.grams;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurfaceVar = Theme.of(context).colorScheme.onSurfaceVariant;
+    return SafeArea(
+      top: false,
+      child: Material(
+        elevation: 8,
+        surfaceTintColor: Theme.of(context).colorScheme.surfaceTint,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Text('Bulk', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: onSurfaceVar)),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: widget.enabled ? () => widget.onScale(-10) : null,
+                child: const Text('-10%'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: widget.enabled ? () => widget.onScale(10) : null,
+                child: const Text('+10%'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: widget.enabled ? () => widget.onScaleCustom() : null,
+                child: const Text('Custom %'),
+              ),
+              const SizedBox(width: 12),
+              DropdownButton<domain.Unit>(
+                value: _unit,
+                onChanged: widget.enabled
+                    ? (u) {
+                        if (u == null) return;
+                        setState(() => _unit = u);
+                        widget.onChangeUnit(u);
+                      }
+                    : null,
+                items: domain.Unit.values
+                    .map((u) => DropdownMenuItem(value: u, child: Text(_unitLabel(u))))
+                    .toList(),
+              ),
+              const SizedBox(width: 12),
+              IconButton(
+                tooltip: 'Delete',
+                onPressed: widget.enabled ? widget.onDelete : null,
+                icon: const Icon(Icons.delete_outline),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Copy',
+                onPressed: widget.enabled ? widget.onCopy : null,
+                icon: const Icon(Icons.copy_all),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _unitLabel(domain.Unit unit) {
+    switch (unit) {
+      case domain.Unit.grams:
+        return 'g';
+      case domain.Unit.milliliters:
+        return 'ml';
+      case domain.Unit.piece:
+        return 'pc';
+    }
+  }
+
+  // ---- Bulk helpers ----
+  List<int> _selectedSorted() {
+    final list = _selectedIndexes.toList()..sort();
+    return list;
+  }
+
+  Future<double?> _showCustomScaleDialog(BuildContext context) async {
+    final ctrl = TextEditingController();
+    return showDialog<double>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Scale by %'),
+          content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(hintText: 'e.g., 15 or -10'),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                final v = double.tryParse(ctrl.text.trim());
+                if (v == null) return;
+                Navigator.of(ctx).pop(v);
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Recipe _bulkScale(Recipe draft, Map<String, domain.Ingredient> byId, double factorPct) {
+    final sel = _selectedSorted();
+    if (sel.isEmpty) return draft;
+    final factor = 1.0 + (factorPct / 100.0);
+    final updated = List<RecipeItem>.from(draft.items);
+    for (final i in sel) {
+      final it = updated[i];
+      final scaled = max(0.0001, it.qty * factor);
+      updated[i] = it.copyWith(qty: scaled);
+    }
+    if (kDebugMode) {
+      debugPrint('[BulkEdit] scale=${factorPct.toStringAsFixed(2)}%');
+    }
+    return draft.copyWith(items: updated);
+  }
+
+  Recipe _bulkChangeUnit(Recipe draft, Map<String, domain.Ingredient> byId, domain.Unit targetUnit) {
+    final sel = _selectedSorted();
+    if (sel.isEmpty) return draft;
+    final updated = List<RecipeItem>.from(draft.items);
+    int skipped = 0;
+    for (final i in sel) {
+      final it = updated[i];
+      final ing = byId[it.ingredientId];
+      if (ing == null) {
+        skipped++;
+        continue;
+      }
+      if (it.unit == targetUnit) {
+        updated[i] = it.copyWith(unit: targetUnit);
+        continue;
+      }
+      // piece <-> mass/vol is not allowed
+      if (it.unit == domain.Unit.piece || targetUnit == domain.Unit.piece) {
+        skipped++;
+        continue;
+      }
+      // grams <-> ml require density
+      final d = ing.densityGPerMl;
+      if (d == null || d <= 0) {
+        skipped++;
+        continue;
+      }
+      double newQty;
+      if (it.unit == domain.Unit.grams && targetUnit == domain.Unit.milliliters) {
+        newQty = it.qty / d;
+      } else if (it.unit == domain.Unit.milliliters && targetUnit == domain.Unit.grams) {
+        newQty = it.qty * d;
+      } else {
+        // same family (already handled) or unsupported
+        newQty = it.qty;
+      }
+      updated[i] = it.copyWith(qty: newQty, unit: targetUnit);
+    }
+    if (skipped > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Changed ${sel.length - skipped} items • Skipped $skipped (unit mismatch or missing density)')),
+      );
+    }
+    if (kDebugMode) {
+      debugPrint('[BulkEdit] changeUnit target=$targetUnit skipped=$skipped');
+    }
+    return draft.copyWith(items: updated);
+  }
+
+  Recipe _bulkDelete(Recipe draft) {
+    final sel = _selectedSorted();
+    if (sel.isEmpty) return draft;
+    final remaining = <RecipeItem>[];
+    for (int i = 0; i < draft.items.length; i++) {
+      if (!sel.contains(i)) remaining.add(draft.items[i]);
+    }
+    if (kDebugMode) {
+      debugPrint('[BulkEdit] delete count=${sel.length}');
+    }
+    // Clear selection after delete
+    setState(() => _selectedIndexes.clear());
+    return draft.copyWith(items: remaining);
+  }
+
+  Recipe _pasteClipboard(Recipe draft, Map<String, domain.Ingredient> byId, List<RecipeItem> items) {
+    int added = 0;
+    int skipped = 0;
+    final result = List<RecipeItem>.from(draft.items);
+    for (final it in items) {
+      final ing = byId[it.ingredientId];
+      if (ing == null) {
+        skipped++;
+        continue;
+      }
+      // Align to ingredient base unit where needed using same rules as calculator
+      final aligned = _convertQty(qty: it.qty, from: it.unit, to: ing.unit, ingredient: ing);
+      // If piece <-> mass/vol attempted, _convertQty returns original qty but unit may be incompatible.
+      // Skip if piece<->mass/vol mismatch
+      if ((it.unit == domain.Unit.piece && ing.unit != domain.Unit.piece) ||
+          (it.unit != domain.Unit.piece && ing.unit == domain.Unit.piece)) {
+        skipped++;
+        continue;
+      }
+      // For grams<->ml with missing density, _convertQty returns original qty and unit mismatch persists -> skip
+      if ((it.unit == domain.Unit.grams && ing.unit == domain.Unit.milliliters) ||
+          (it.unit == domain.Unit.milliliters && ing.unit == domain.Unit.grams)) {
+        final d = ing.densityGPerMl;
+        if (d == null || d <= 0) {
+          skipped++;
+          continue;
+        }
+      }
+      result.add(RecipeItem(ingredientId: it.ingredientId, qty: aligned, unit: ing.unit));
+      added++;
+    }
+    if (mounted) {
+      final msg = 'Pasted $added item(s)${skipped > 0 ? ' ($skipped skipped: unit mismatch)' : ''}.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+    if (kDebugMode) {
+      debugPrint('[BulkEdit] paste added=$added skipped=$skipped');
+    }
+    return draft.copyWith(items: result);
+  }
+
+  double _convertQty({
+    required double qty,
+    required domain.Unit from,
+    required domain.Unit to,
+    required domain.Ingredient ingredient,
+  }) {
+    if (from == to) return qty;
+    if ((from == domain.Unit.grams && to == domain.Unit.milliliters) ||
+        (from == domain.Unit.milliliters && to == domain.Unit.grams)) {
+      final d = ingredient.densityGPerMl;
+      if (d != null && d > 0) {
+        return (from == domain.Unit.grams && to == domain.Unit.milliliters) ? (qty / d) : (qty * d);
+      } else {
+        return qty;
+      }
+    }
+    if (from == domain.Unit.piece || to == domain.Unit.piece) {
+      return qty;
+    }
+    return qty;
   }
 }
 
