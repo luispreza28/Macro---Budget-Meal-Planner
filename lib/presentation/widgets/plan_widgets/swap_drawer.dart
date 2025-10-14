@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_features.dart';
 import '../../../domain/services/pantry_utilization_service.dart';
 import '../../providers/ingredient_providers.dart';
 import '../../../domain/services/variety_prefs_service.dart';
+import '../../providers/recipe_providers.dart';
+import '../../providers/substitution_providers.dart';
+import '../../../domain/value/substitution_score.dart';
 
 /// Bottom drawer for showing meal swap options
 class SwapDrawer extends ConsumerStatefulWidget {
@@ -15,6 +19,7 @@ class SwapDrawer extends ConsumerStatefulWidget {
     required this.alternatives,
     required this.onSwapSelected,
     required this.onClose,
+    this.servingsForMeal = 1,
     this.errorMessage,
     this.isLoading = false,
   });
@@ -25,6 +30,7 @@ class SwapDrawer extends ConsumerStatefulWidget {
     required this.onClose,
   }) : alternatives = const [],
        onSwapSelected = _noRecipe,
+       servingsForMeal = 1,
        errorMessage = null,
        isLoading = true;
 
@@ -35,6 +41,7 @@ class SwapDrawer extends ConsumerStatefulWidget {
     String message = 'Error',
   }) : alternatives = const [],
        onSwapSelected = _noRecipe,
+       servingsForMeal = 1,
        errorMessage = message,
        isLoading = false;
 
@@ -42,6 +49,7 @@ class SwapDrawer extends ConsumerStatefulWidget {
   final List<SwapOption> alternatives;
   final void Function(Recipe newRecipe) onSwapSelected;
   final VoidCallback onClose;
+  final int servingsForMeal;
   final String? errorMessage;
   final bool isLoading;
 
@@ -49,7 +57,12 @@ class SwapDrawer extends ConsumerStatefulWidget {
   ConsumerState<SwapDrawer> createState() => _SwapDrawerState();
 }
 
-class _SwapDrawerState extends ConsumerState<SwapDrawer> {\r\n  bool _pantryFirst = true;\r\n  bool _computingPantry = false;\r\n  final Map<String, PantryUtilization> _utilCache = {};
+class _SwapDrawerState extends ConsumerState<SwapDrawer> {
+  bool _pantryFirst = true;
+  bool _cheaperFirst = true; // new filter
+  bool _closerMacros = false; // new filter
+  bool _computingPantry = false;
+  final Map<String, PantryUtilization> _utilCache = {};
   bool _favoritesOnly = false;
   bool _hideExcluded = true;
   bool _avoidRepetition = true; // mirrors prefs (default ON)
@@ -69,6 +82,13 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {\r\n  bool _pantryFirs
   @override
   Widget build(BuildContext context) {
     final alternatives = widget.alternatives;
+    final allRecipesAsync = ref.watch(allRecipesProvider);
+    final subsAsync = ref.watch(
+      substitutionScoresProvider((
+        currentRecipeId: widget.currentRecipe.id,
+        servingsForMeal: widget.servingsForMeal,
+      )),
+    );
 
     // Precompute pantry utilization lazily for visible candidates
     Future<void> _ensurePantry() async {
@@ -156,8 +176,118 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {\r\n  bool _pantryFirs
         });
       }
 
-      content = ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+      // If Smart Substitutions v2 available, render that list; else legacy
+      final recipes = allRecipesAsync.asData?.value ?? const <Recipe>[];
+      final byId = {for (final r in recipes) r.id: r};
+
+      List<({Recipe recipe, SubstitutionScore score, double localScore})> smartRows = [];
+      subsAsync.whenOrNull(data: (scores) {
+        // Adjust order based on local filter weights
+        for (final s in scores) {
+          final r = byId[s.candidateRecipeId];
+          if (r == null) continue;
+          // Visibility gates
+          if (_pantryFirst && s.pantryGain < 0.05) continue;
+          if (_cheaperFirst && s.budgetGain < 0.05) continue;
+          if (_closerMacros && s.macroGain < 0.05) continue;
+          final wPantry = _pantryFirst ? 0.45 : 0.0;
+          final wBudget = _cheaperFirst ? 0.35 : 0.0;
+          final wMacro = _closerMacros ? 0.20 : 0.0;
+          final any = (wPantry + wBudget + wMacro) > 0;
+          final local = any
+              ? (s.pantryGain * wPantry + s.budgetGain * wBudget + s.macroGain * wMacro)
+              : s.composite;
+          smartRows.add((recipe: r, score: s, localScore: local));
+        }
+        smartRows.sort((b, a) => a.localScore.compareTo(b.localScore));
+      });
+
+      content = smartRows.isNotEmpty
+          ? ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: smartRows.length,
+              itemBuilder: (context, index) {
+                final row = smartRows[index];
+                final r = row.recipe;
+                final s = row.score;
+                final isFav = favs.contains(r.id);
+                final currencyFmt = NumberFormat.currency(symbol: '\$');
+                final pantryPct = (s.coverageDelta * 100);
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            if (isFav) ...[
+                              const Icon(Icons.star, size: 16, color: Colors.amber),
+                              const SizedBox(width: 6),
+                            ],
+                            Expanded(
+                              child: Text(
+                                r.name,
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                final prev = widget.currentRecipe;
+                                widget.onSwapSelected(r);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Swapped to ${r.name}'),
+                                    action: SnackBarAction(
+                                      label: 'Undo',
+                                      onPressed: () => widget.onSwapSelected(prev),
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: const Text('Apply'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            _ImpactChip(
+                              label: '${pantryPct >= 0 ? '+' : ''}${pantryPct.toStringAsFixed(0)}% pantry',
+                              isPositive: s.pantryGain > 0,
+                              icon: Icons.kitchen,
+                            ),
+                            _ImpactChip(
+                              label: s.weeklyCostDeltaCents <= 0
+                                  ? '-${currencyFmt.format(s.weeklyCostDeltaCents.abs() / 100)} / wk'
+                                  : '+${currencyFmt.format(s.weeklyCostDeltaCents.abs() / 100)} / wk',
+                              isPositive: s.weeklyCostDeltaCents <= 0,
+                              icon: Icons.attach_money,
+                            ),
+                            _ImpactChip(
+                              label:
+                                  '${s.macroDeltaPerServ.kcal >= 0 ? '+' : ''}${s.macroDeltaPerServ.kcal.toStringAsFixed(0)} kcal • '
+                                  '${s.macroDeltaPerServ.proteinG >= 0 ? '+' : ''}${s.macroDeltaPerServ.proteinG.toStringAsFixed(0)}P '
+                                  '${s.macroDeltaPerServ.carbsG >= 0 ? '+' : ''}${s.macroDeltaPerServ.carbsG.toStringAsFixed(0)}C '
+                                  '${s.macroDeltaPerServ.fatG >= 0 ? '+' : ''}${s.macroDeltaPerServ.fatG.toStringAsFixed(0)}F',
+                              isPositive: true,
+                              icon: Icons.local_fire_department,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            )
+          : ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: toShow.length,
         itemBuilder: (context, index) {
           final option = toShow[index];
@@ -245,7 +375,25 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {\r\n  bool _pantryFirs
                 FilterChip(
                   label: const Text('Avoid repetition'),
                   selected: _avoidRepetition,
-                  onSelected: (v) => setState(() => _avoidRepetition = v),\r\n                ),\r\n                const SizedBox(width: 8),\r\n                FilterChip(\r\n                  label: const Text('Pantry-first'),\r\n                  selected: _pantryFirst,\r\n                  onSelected: (v) => setState(() => _pantryFirst = v),
+                  onSelected: (v) => setState(() => _avoidRepetition = v),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Pantry-first'),
+                  selected: _pantryFirst,
+                  onSelected: (v) => setState(() => _pantryFirst = v),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Cheaper'),
+                  selected: _cheaperFirst,
+                  onSelected: (v) => setState(() => _cheaperFirst = v),
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Closer macros'),
+                  selected: _closerMacros,
+                  onSelected: (v) => setState(() => _closerMacros = v),
                 ),
               ],
             ),

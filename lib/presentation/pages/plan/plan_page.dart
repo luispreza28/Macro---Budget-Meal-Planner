@@ -510,6 +510,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 unawaited(_handleSwapSelected(dayIndex, mealIndex, newRecipe));
               },
               onClose: _closeSwapDrawer,
+              servingsForMeal: currentMeal.servings,
             );
           },
         );
