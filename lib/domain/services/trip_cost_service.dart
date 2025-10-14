@@ -93,7 +93,7 @@ class TripCostService {
     final ppu = _ppuFor(ing, overridePriceCentsPerBase);
 
     // Align unit
-    double baseQty;
+    double? baseQty;
     if (unit == ing.unit) {
       baseQty = qty;
     } else if ((unit == Unit.grams && ing.unit == Unit.milliliters) ||
@@ -101,18 +101,40 @@ class TripCostService {
       final d = ing.densityGPerMl;
       if (d == null || d <= 0) {
         if (kDebugMode) {
-          debugPrint(
-              '[TripCost][WARN] density missing for ${ing.id}; using raw qty without conversion');
+          debugPrint('[TripCost][WARN] density missing for ${ing.id}; skip item due to unit mismatch');
         }
-        baseQty = qty; // documented behavior
+        baseQty = null; // strict: mismatch
       } else {
         baseQty = (unit == Unit.grams) ? qty / d : qty * d;
       }
+    } else if ((unit == Unit.piece && ing.unit == Unit.grams) || (unit == Unit.grams && ing.unit == Unit.piece)) {
+      final gpp = ing.gramsPerPiece;
+      if (gpp != null && gpp > 0) {
+        baseQty = (unit == Unit.piece) ? qty * gpp : qty / gpp;
+        if (kDebugMode) {
+          debugPrint('[TripCost] piece conversion using gramsPerPiece=$gpp');
+        }
+      } else {
+        if (kDebugMode) debugPrint('[TripCost][WARN] gramsPerPiece missing for ${ing.id}; skip item');
+        baseQty = null;
+      }
+    } else if ((unit == Unit.piece && ing.unit == Unit.milliliters) || (unit == Unit.milliliters && ing.unit == Unit.piece)) {
+      final mpp = ing.mlPerPiece;
+      if (mpp != null && mpp > 0) {
+        baseQty = (unit == Unit.piece) ? qty * mpp : qty / mpp;
+        if (kDebugMode) {
+          debugPrint('[TripCost] piece conversion using mlPerPiece=$mpp');
+        }
+      } else {
+        if (kDebugMode) debugPrint('[TripCost][WARN] mlPerPiece missing for ${ing.id}; skip item');
+        baseQty = null;
+      }
     } else {
-      // piece<->mass/volume are not auto-converted; only price per piece when base is piece
-      baseQty = qty;
+      // Other mismatches we cannot reconcile
+      baseQty = null;
     }
 
+    if (baseQty == null) return 0; // strict: cost only if aligned
     final cents = (baseQty * ppu).round();
     return cents;
   }

@@ -91,12 +91,36 @@ class ReplenishService {
               '${baseQty.toStringAsFixed(2)} ${baseUnit.name} density=${density.toString()}');
         }
       } else if (s.unit == Unit.piece || baseUnit == Unit.piece) {
-        // disallow piece <-> mass/volume as per unit rules
-        mismatches.add('${ing.name}: unit mismatch (piece vs mass/volume)');
-        if (kDebugMode) {
-          debugPrint('[Replenish] mismatch id=${ing.id} reason=piece<->mass/volume');
+        // piece conversions via per-piece size
+        final gpp = ing.gramsPerPiece;
+        final mpp = ing.mlPerPiece;
+        if (s.unit == Unit.piece && baseUnit == Unit.grams && gpp != null && gpp > 0) {
+          baseQty = s.qty * gpp;
+          if (kDebugMode) {
+            debugPrint('[Replenish] piece conversion using gramsPerPiece: ${s.qty} pcs -> ${baseQty!.toStringAsFixed(2)} g');
+          }
+        } else if (s.unit == Unit.piece && baseUnit == Unit.milliliters && mpp != null && mpp > 0) {
+          baseQty = s.qty * mpp;
+          if (kDebugMode) {
+            debugPrint('[Replenish] piece conversion using mlPerPiece: ${s.qty} pcs -> ${baseQty!.toStringAsFixed(2)} ml');
+          }
+        } else if (baseUnit == Unit.piece && s.unit == Unit.grams && gpp != null && gpp > 0) {
+          baseQty = s.qty / gpp;
+          if (kDebugMode) {
+            debugPrint('[Replenish] piece conversion using gramsPerPiece: ${s.qty} g -> ${baseQty!.toStringAsFixed(2)} pcs');
+          }
+        } else if (baseUnit == Unit.piece && s.unit == Unit.milliliters && mpp != null && mpp > 0) {
+          baseQty = s.qty / mpp;
+          if (kDebugMode) {
+            debugPrint('[Replenish] piece conversion using mlPerPiece: ${s.qty} ml -> ${baseQty!.toStringAsFixed(2)} pcs');
+          }
+        } else {
+          mismatches.add('${ing.name}: unit mismatch (piece conversion needs size)');
+          if (kDebugMode) {
+            debugPrint('[Replenish] mismatch id=${ing.id} reason=piece conversion needs gramsPerPiece/mlPerPiece');
+          }
+          continue;
         }
-        continue;
       } else {
         // Other unknown mismatch
         mismatches.add('${ing.name}: unit mismatch');

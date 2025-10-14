@@ -51,7 +51,7 @@ class PantryShortfallService {
     return computeShortfalls(requiredItems: requiredItems);
   }
 
-  /// Core utility: given required items (ingredientId, qty, unit) → shortfalls.
+  /// Core utility: given required items (ingredientId, qty, unit) -> shortfalls.
   Future<List<ShortfallItem>> computeShortfalls({
     required List<({String ingredientId, double qty, Unit unit})> requiredItems,
   }) async {
@@ -130,39 +130,77 @@ class PantryShortfallService {
         if (onHandUnits.containsKey(reqUnit)) {
           missingQty = (reqQty - (onHandUnits[reqUnit] ?? 0)).clamp(0.0, double.infinity);
         } else {
-          // Attempt g<->ml conversion if density present.
+          // Mass-volume convert if density present
           final canBeMassVolumePair =
               (reqUnit == Unit.grams && onHandUnits.keys.any((u) => u == Unit.milliliters)) ||
               (reqUnit == Unit.milliliters && onHandUnits.keys.any((u) => u == Unit.grams));
 
-          final involvesPiece = reqUnit == Unit.piece ||
-              onHandUnits.keys.any((u) => u == Unit.piece);
+          final involvesPiece = reqUnit == Unit.piece || onHandUnits.keys.any((u) => u == Unit.piece);
 
-          if (involvesPiece && (reqUnit != Unit.piece || onHandUnits.isNotEmpty)) {
-            // No piece<->mass/volume conversion
-            reason = 'piece↔mass/volume mismatch';
-            // keep required qty; do not subtract
+          if (involvesPiece) {
+            double availableInReqUnit = 0.0;
+            if (reqUnit == Unit.piece) {
+              final gpp = ingredient.gramsPerPiece;
+              final mpp = ingredient.mlPerPiece;
+              onHandUnits.forEach((u, qty) {
+                if (u == Unit.grams && gpp != null && gpp > 0) {
+                  final pcs = qty / gpp;
+                  if (kDebugMode) {
+                    debugPrint('[Shortfall] CONVERT piece<->g|ml using per-piece size');
+                  }
+                  availableInReqUnit += pcs;
+                } else if (u == Unit.milliliters && mpp != null && mpp > 0) {
+                  final pcs = qty / mpp;
+                  if (kDebugMode) {
+                    debugPrint('[Shortfall] CONVERT piece<->g|ml using per-piece size');
+                  }
+                  availableInReqUnit += pcs;
+                }
+              });
+            } else if (onHandUnits.keys.any((u) => u == Unit.piece)) {
+              final gpp = ingredient.gramsPerPiece;
+              final mpp = ingredient.mlPerPiece;
+              onHandUnits.forEach((u, qty) {
+                if (u == Unit.piece) {
+                  if (reqUnit == Unit.grams && gpp != null && gpp > 0) {
+                    final grams = qty * gpp;
+                    if (kDebugMode) {
+                      debugPrint('[Shortfall] CONVERT piece<->g|ml using per-piece size');
+                    }
+                    availableInReqUnit += grams;
+                  } else if (reqUnit == Unit.milliliters && mpp != null && mpp > 0) {
+                    final ml = qty * mpp;
+                    if (kDebugMode) {
+                      debugPrint('[Shortfall] CONVERT piece<->g|ml using per-piece size');
+                    }
+                    availableInReqUnit += ml;
+                  }
+                }
+              });
+            }
+
+            if (availableInReqUnit > 0) {
+              missingQty = (reqQty - availableInReqUnit).clamp(0.0, double.infinity);
+            } else {
+              reason = 'unit mismatch (needs per-piece size)';
+            }
           } else if (canBeMassVolumePair) {
             final density = ingredient.densityGPerMl;
             if (density == null || density <= 0) {
               reason = 'unit mismatch (needs density)';
-              // keep required qty; do not subtract
             } else {
-              // Convert all on-hand grams/ml to required unit using density and subtract
               double availableInReqUnit = 0.0;
               onHandUnits.forEach((u, qty) {
                 if (u == Unit.grams && reqUnit == Unit.milliliters) {
                   final converted = _gramsToMl(qty, density);
                   if (kDebugMode) {
-                    debugPrint('[Shortfall] CONVERT g↔ml using density=${density.toStringAsFixed(3)} : '
-                        'onHand ${qty.toStringAsFixed(2)} ${u.name} -> ${converted.toStringAsFixed(2)} ${reqUnit.name}');
+                    debugPrint('[Shortfall] CONVERT g<->ml using density=${density.toStringAsFixed(3)}');
                   }
                   availableInReqUnit += converted;
                 } else if (u == Unit.milliliters && reqUnit == Unit.grams) {
                   final converted = _mlToGrams(qty, density);
                   if (kDebugMode) {
-                    debugPrint('[Shortfall] CONVERT g↔ml using density=${density.toStringAsFixed(3)} : '
-                        'onHand ${qty.toStringAsFixed(2)} ${u.name} -> ${converted.toStringAsFixed(2)} ${reqUnit.name}');
+                    debugPrint('[Shortfall] CONVERT g<->ml using density=${density.toStringAsFixed(3)}');
                   }
                   availableInReqUnit += converted;
                 }
@@ -170,7 +208,6 @@ class PantryShortfallService {
               missingQty = (reqQty - availableInReqUnit).clamp(0.0, double.infinity);
             }
           } else {
-            // Other mismatches we cannot reconcile => keep required qty
             reason = 'unit mismatch';
           }
         }
@@ -185,12 +222,9 @@ class PantryShortfallService {
             reason: reason,
           );
           if (kDebugMode) {
-            debugPrint('[Shortfall] OUT: ${item.name} missing=${item.missingQty.toStringAsFixed(2)} '
-                '${item.unit.name} aisle=${item.aisle.name}');
+            debugPrint('[Shortfall] OUT: ${item.name} missing=${item.missingQty.toStringAsFixed(2)} ${item.unit.name} aisle=${item.aisle.name}');
           }
           out.add(item);
-        } else {
-          // Clamp to 0, don't emit negatives
         }
       }
     }
@@ -201,3 +235,4 @@ class PantryShortfallService {
   double _mlToGrams(double qty, double densityGPerMl) => qty * densityGPerMl;
   double _gramsToMl(double qty, double densityGPerMl) => qty / densityGPerMl;
 }
+

@@ -254,12 +254,45 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
                                                       color: Theme.of(context).colorScheme.error,
                                                     ),
                                               ),
-                                            if (ingredient != null)
+                                            if (ingredient != null) ...[
                                               _ConversionHint(
                                                 itemUnit: item.unit,
                                                 baseUnit: ingredient.unit,
                                                 density: ingredient.densityGPerMl,
                                               ),
+                                              // Piece conversion caption
+                                              if ((item.unit == domain.Unit.piece && (ingredient.gramsPerPiece ?? 0) > 0) ||
+                                                  (item.unit == domain.Unit.piece && (ingredient.mlPerPiece ?? 0) > 0) ||
+                                                  (ingredient.unit == domain.Unit.piece && item.unit != domain.Unit.piece &&
+                                                      ((item.unit == domain.Unit.grams && (ingredient.gramsPerPiece ?? 0) > 0) ||
+                                                       (item.unit == domain.Unit.milliliters && (ingredient.mlPerPiece ?? 0) > 0))))
+                                                Padding(
+                                                  padding: const EdgeInsets.only(top: 2),
+                                                  child: Text(
+                                                    'Converted using per-piece size',
+                                                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                        ),
+                                                  ),
+                                                ),
+                                              // Missing piece macros/size warning for piece items
+                                              if (item.unit == domain.Unit.piece &&
+                                                  (ingredient.nutritionPerPieceKcal ?? 0) <= 0 &&
+                                                  (ingredient.nutritionPerPieceProteinG ?? 0) <= 0 &&
+                                                  (ingredient.nutritionPerPieceCarbsG ?? 0) <= 0 &&
+                                                  (ingredient.nutritionPerPieceFatG ?? 0) <= 0 &&
+                                                  (ingredient.gramsPerPiece == null) &&
+                                                  (ingredient.mlPerPiece == null))
+                                                Padding(
+                                                  padding: const EdgeInsets.only(top: 2),
+                                                  child: Text(
+                                                    'Piece nutrition/size missing — macros may be incomplete; conversions disabled.',
+                                                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                        ),
+                                                  ),
+                                                ),
+                                            ],
                                           ],
                                         ),
                                       ),

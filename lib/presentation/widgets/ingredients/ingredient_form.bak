@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../../../domain/entities/ingredient.dart';
 
@@ -105,7 +105,7 @@ class _IngredientFormState extends State<IngredientForm> {
                 _densityGPerMl,
                 label: 'Density (g per ml)',
                 allowEmpty: true,
-                helperText: 'Used to convert grams↔milliliters for this ingredient only.',
+                helperText: 'Used to convert gramsâ†”milliliters for this ingredient only.',
                 validator: (t) {
                   final v = t?.trim() ?? '';
                   if (v.isEmpty) return null; // optional
@@ -126,7 +126,7 @@ class _IngredientFormState extends State<IngredientForm> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          'With density set, we can convert g↔ml in recipes and shortfalls.',
+                          'With density set, we can convert gâ†”ml in recipes and shortfalls.',
                           style: Theme.of(context).textTheme.labelMedium?.copyWith(color: onSurfaceVar),
                         ),
                       ),
@@ -144,55 +144,8 @@ class _IngredientFormState extends State<IngredientForm> {
               _numberField(_carbsPiece, label: 'Carbs (g) per piece'),
               _numberField(_fatPiece, label: 'Fat (g) per piece'),
               const SizedBox(height: 8),
-              // Per-piece size (optional, enables piece<->g/ml conversions)
-              if (ing.unit == Unit.milliliters || ing.unit == Unit.piece)
-                _numberField(
-                  _gPerPiece,
-                  label: 'gramsPerPiece (optional)',
-                  allowEmpty: true,
-                  helperText: 'When provided, piece↔g conversion is enabled.',
-                  validator: (t) {
-                    final v = t?.trim() ?? '';
-                    if (v.isEmpty) return null;
-                    final d = double.tryParse(v);
-                    if (d == null) return 'Enter a number';
-                    if (d <= 0) return 'Must be > 0';
-                    if (d > 2000) return 'Unreasonably high (> 2000)';
-                    return null;
-                  },
-                ),
-              if (ing.unit == Unit.grams || ing.unit == Unit.piece)
-                _numberField(
-                  _mlPerPiece,
-                  label: 'mlPerPiece (optional)',
-                  allowEmpty: true,
-                  helperText: 'When provided, piece↔ml conversion is enabled.',
-                  validator: (t) {
-                    final v = t?.trim() ?? '';
-                    if (v.isEmpty) return null;
-                    final d = double.tryParse(v);
-                    if (d == null) return 'Enter a number';
-                    if (d <= 0) return 'Must be > 0';
-                    if (d > 2000) return 'Unreasonably high (> 2000)';
-                    return null;
-                  },
-                ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4.0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.tertiary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Per-piece macros override per-100 for piece calculations. When provided, piece↔g/ml conversion is enabled for this ingredient.',
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(color: onSurfaceVar),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _numberField(_gPerPiece, label: 'gramsPerPiece (optional)', allowEmpty: true),
+              _numberField(_mlPerPiece, label: 'mlPerPiece (optional)', allowEmpty: true),
               const SizedBox(height: 8),
               if (ing.unit == Unit.piece && !_hasEnabledPerPiece())
                 Row(
@@ -245,7 +198,7 @@ class _IngredientFormState extends State<IngredientForm> {
 
     if (_mode == _EditMode.perPiece) {
       if (!enabled) {
-        // Treat as disabled — don’t force-save zeros; set nullable fields to null
+        // Treat as disabled â€” donâ€™t force-save zeros; set nullable fields to null
         updated = updated.copyWith(
           nutritionPerPieceKcal: () => null,
           nutritionPerPieceProteinG: () => null,
@@ -253,7 +206,7 @@ class _IngredientFormState extends State<IngredientForm> {
           nutritionPerPieceFatG: () => null,
         );
       } else {
-        // At least one > 0 → enable overrides; empty fields default to 0
+        // At least one > 0 â†’ enable overrides; empty fields default to 0
         double _parseZ(String s) => double.tryParse(s.trim()) ?? 0;
         updated = updated.copyWith(
           nutritionPerPieceKcal: () => _parseZ(_kcalPiece.text),
@@ -313,7 +266,7 @@ class _IngredientFormState extends State<IngredientForm> {
           if (t.isEmpty) return allowEmpty ? null : 'Required';
           final d = double.tryParse(t);
           if (d == null) return 'Enter a number';
-          if (d < 0) return 'Must be ≥ 0';
+          if (d < 0) return 'Must be â‰¥ 0';
           return null;
         },
       ),

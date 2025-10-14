@@ -95,22 +95,30 @@ class PantryUtilizationService {
     );
   }
 
-  /// Utility to align units using density rules (g<->ml only if density present).
+  /// Utility to align units using density and per-piece size.
   /// Returns qty in `to` units or null if mismatch.
   double? convertQty(double qty, Unit from, Unit to, Ingredient ing) {
     if (from == to) return qty;
-    // Never convert piece <-> mass/volume for now
-    if (from == Unit.piece || to == Unit.piece) return null;
+
+    // piece <-> grams via gramsPerPiece
+    if ((from == Unit.piece && to == Unit.grams) || (from == Unit.grams && to == Unit.piece)) {
+      final gpp = ing.gramsPerPiece;
+      if (gpp == null || gpp <= 0) return null;
+      return (from == Unit.piece) ? qty * gpp : qty / gpp;
+    }
+    // piece <-> ml via mlPerPiece
+    if ((from == Unit.piece && to == Unit.milliliters) || (from == Unit.milliliters && to == Unit.piece)) {
+      final mpp = ing.mlPerPiece;
+      if (mpp == null || mpp <= 0) return null;
+      return (from == Unit.piece) ? qty * mpp : qty / mpp;
+    }
 
     // grams <-> milliliters via density
-    final density = ing.densityGPerMl;
-    if (density == null || density <= 0) return null;
-
-    if (from == Unit.grams && to == Unit.milliliters) {
-      return qty / density; // g -> ml
-    }
-    if (from == Unit.milliliters && to == Unit.grams) {
-      return qty * density; // ml -> g
+    if ((from == Unit.grams && to == Unit.milliliters) || (from == Unit.milliliters && to == Unit.grams)) {
+      final density = ing.densityGPerMl;
+      if (density == null || density <= 0) return null;
+      if (from == Unit.grams && to == Unit.milliliters) return qty / density; // g -> ml
+      if (from == Unit.milliliters && to == Unit.grams) return qty * density; // ml -> g
     }
     return null;
   }

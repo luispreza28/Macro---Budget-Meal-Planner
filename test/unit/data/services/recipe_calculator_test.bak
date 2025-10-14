@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 
 import 'package:macro_budget_meal_planner/data/services/recipe_calculator.dart';
 import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart';
@@ -134,78 +134,6 @@ void main() {
       expect(res.missingNutrition, isFalse);
     });
 
-    test('piece with per-piece macros preferred over per-100', () {
-      final egg = const Ingredient(
-        id: 'egg',
-        name: 'Egg',
-        unit: Unit.piece,
-        macrosPer100g: MacrosPerHundred(kcal: 155, proteinG: 13, carbsG: 1.1, fatG: 11),
-        pricePerUnitCents: 25,
-        purchasePack: PurchasePack(qty: 12, unit: Unit.piece, priceCents: 300),
-        aisle: Aisle.dairy,
-        tags: ['protein'],
-        source: IngredientSource.manual,
-      ).copyWith(
-        nutritionPerPieceKcal: () => 70,
-        nutritionPerPieceProteinG: () => 6,
-        nutritionPerPieceCarbsG: () => 0.6,
-        nutritionPerPieceFatG: () => 4.8,
-      );
-
-      final recipe = Recipe(
-        id: 'r_egg',
-        name: 'Eggs',
-        servings: 1,
-        timeMins: 1,
-        cuisine: null,
-        dietFlags: const [],
-        items: const [RecipeItem(ingredientId: 'egg', qty: 2, unit: Unit.piece)],
-        steps: const [],
-        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
-        costPerServCents: 0,
-        source: RecipeSource.manual,
-      );
-
-      final res = RecipeCalculator.compute(recipe: recipe, ingredientsById: {'egg': egg});
-      expect(res.kcalPerServ, closeTo(140, 0.01));
-      expect(res.proteinGPerServ, closeTo(12, 0.01));
-      expect(res.missingNutrition, isFalse);
-    });
-
-    test('piece with mlPerPiece fallback to per-100', () {
-      final sauce = const Ingredient(
-        id: 'sauce',
-        name: 'Sauce Pack',
-        unit: Unit.piece,
-        macrosPer100g: MacrosPerHundred(kcal: 50, proteinG: 1, carbsG: 10, fatG: 0),
-        pricePerUnitCents: 10,
-        purchasePack: PurchasePack(qty: 6, unit: Unit.piece, priceCents: 60),
-        aisle: Aisle.condiments,
-        tags: [],
-        source: IngredientSource.manual,
-      ).copyWith(mlPerPiece: () => 30);
-
-      final recipe = Recipe(
-        id: 'r_sauce',
-        name: 'Saucy',
-        servings: 1,
-        timeMins: 1,
-        cuisine: null,
-        dietFlags: const [],
-        items: const [RecipeItem(ingredientId: 'sauce', qty: 2, unit: Unit.piece)],
-        steps: const [],
-        macrosPerServ: const MacrosPerServing(kcal: 0, proteinG: 0, carbsG: 0, fatG: 0),
-        costPerServCents: 0,
-        source: RecipeSource.manual,
-      );
-
-      final res = RecipeCalculator.compute(recipe: recipe, ingredientsById: {'sauce': sauce});
-      // 2 pcs * 30 ml = 60 ml -> per-100 factor 0.6
-      expect(res.kcalPerServ, closeTo(50 * 0.6, 0.01));
-      expect(res.carbsGPerServ, closeTo(10 * 0.6, 0.01));
-      expect(res.missingNutrition, isFalse);
-    });
-
     test('purchasePack vs pricePerUnitCents', () {
       const spice = Ingredient(
         id: 'spice',
@@ -311,3 +239,4 @@ void main() {
     });
   });
 }
+
