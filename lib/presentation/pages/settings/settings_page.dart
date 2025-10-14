@@ -12,6 +12,8 @@ import '../../providers/recipe_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../../domain/entities/ingredient.dart';
 import '../../../domain/services/variety_prefs_service.dart';
+import '../../../domain/services/reminder_prefs_service.dart';
+import '../../../domain/services/reminder_scheduler.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -37,10 +39,23 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _enablePrepMix = true;
   int _historyLookbackPlans = 2; // 0..4
 
+  // Reminders prefs
+  bool _loadingReminders = true;
+  bool _shopEnabled = true;
+  int _shopDay = DateTime.monday; // 1..7 (Mon=1)
+  TimeOfDay _shopTime = const TimeOfDay(hour: 9, minute: 0);
+
+  bool _prepEnabled = false;
+  TimeOfDay _prepTime = const TimeOfDay(hour: 18, minute: 0);
+
+  bool _replenishEnabled = true;
+  TimeOfDay _replenishTime = const TimeOfDay(hour: 20, minute: 0);
+
   @override
   void initState() {
     super.initState();
     _loadVarietyPrefs();
+    _loadReminderPrefs();
   }
 
   Future<void> _loadVarietyPrefs() async {
@@ -59,6 +74,49 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       _historyLookbackPlans = hist;
       _loadingVariety = false;
     });
+  }
+
+  Future<void> _loadReminderPrefs() async {
+    final svc = ref.read(reminderPrefsServiceProvider);
+    final shopE = await svc.shopEnabled();
+    final shopD = await svc.shopDay();
+    final shopT = await svc.shopTime();
+    final prepE = await svc.prepEnabled();
+    final prepT = await svc.prepTime();
+    final repE = await svc.replenishEnabled();
+    final repT = await svc.replenishTime();
+    if (!mounted) return;
+    setState(() {
+      _shopEnabled = shopE;
+      _shopDay = shopD;
+      _shopTime = shopT;
+      _prepEnabled = prepE;
+      _prepTime = prepT;
+      _replenishEnabled = repE;
+      _replenishTime = repT;
+      _loadingReminders = false;
+    });
+  }
+
+  Future<void> _rescheduleReminders() async {
+    await ref.read(reminderSchedulerProvider).rescheduleAll();
+  }
+
+  String _weekdayLabel(int weekday) {
+    const names = <int, String>{
+      DateTime.monday: 'Mon',
+      DateTime.tuesday: 'Tue',
+      DateTime.wednesday: 'Wed',
+      DateTime.thursday: 'Thu',
+      DateTime.friday: 'Fri',
+      DateTime.saturday: 'Sat',
+      DateTime.sunday: 'Sun',
+    };
+    return names[weekday] ?? 'Mon';
+  }
+
+  Future<TimeOfDay?> _pickTime(TimeOfDay initial) async {
+    return showTimePicker(context: context, initialTime: initial);
   }
 
   @override
@@ -358,6 +416,166 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
           ),
+
+          const SizedBox(height: 16),
+
+          // Reminders Section
+          _buildSectionHeader('Reminders'),
+          if (_loadingReminders)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  // Shopping Day
+                  SwitchListTile(
+                    title: const Text('Shopping Day'),
+                    subtitle: const Text('Weekly reminder for your shop'),
+                    value: _shopEnabled,
+                    onChanged: (v) async {
+                      setState(() => _shopEnabled = v);
+                      final svc = ref.read(reminderPrefsServiceProvider);
+                      await svc.setShopEnabled(v);
+                      await _rescheduleReminders();
+                    },
+                    secondary: const Icon(Icons.shopping_bag_outlined),
+                  ),
+                  if (_shopEnabled) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          const Text('Day'),
+                          const SizedBox(width: 16),
+                          DropdownButton<int>(
+                            value: _shopDay,
+                            items: const [
+                              DropdownMenuItem(
+                                  value: DateTime.monday, child: Text('Mon')),
+                              DropdownMenuItem(
+                                  value: DateTime.tuesday, child: Text('Tue')),
+                              DropdownMenuItem(
+                                  value: DateTime.wednesday,
+                                  child: Text('Wed')),
+                              DropdownMenuItem(
+                                  value: DateTime.thursday, child: Text('Thu')),
+                              DropdownMenuItem(
+                                  value: DateTime.friday, child: Text('Fri')),
+                              DropdownMenuItem(
+                                  value: DateTime.saturday, child: Text('Sat')),
+                              DropdownMenuItem(
+                                  value: DateTime.sunday, child: Text('Sun')),
+                            ],
+                            onChanged: (val) async {
+                              if (val == null) return;
+                              setState(() => _shopDay = val);
+                              final svc = ref.read(reminderPrefsServiceProvider);
+                              await svc.setShopDay(val);
+                              await _rescheduleReminders();
+                            },
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: () async {
+                              final picked = await _pickTime(_shopTime);
+                              if (picked == null) return;
+                              setState(() => _shopTime = picked);
+                              final svc =
+                                  ref.read(reminderPrefsServiceProvider);
+                              await svc.setShopTime(picked);
+                              await _rescheduleReminders();
+                            },
+                            icon: const Icon(Icons.schedule),
+                            label: Text(
+                                '${_shopTime.hour.toString().padLeft(2, '0')}:${_shopTime.minute.toString().padLeft(2, '0')}'),
+                          )
+                        ],
+                      ),
+                    ),
+                  ],
+                  const Divider(height: 1),
+
+                  // Meal Prep
+                  SwitchListTile(
+                    title: const Text('Meal Prep'),
+                    subtitle:
+                        const Text('Daily reminder (e.g., 6:00 PM)'),
+                    value: _prepEnabled,
+                    onChanged: (v) async {
+                      setState(() => _prepEnabled = v);
+                      final svc = ref.read(reminderPrefsServiceProvider);
+                      await svc.setPrepEnabled(v);
+                      await _rescheduleReminders();
+                    },
+                    secondary: const Icon(Icons.restaurant_menu_outlined),
+                  ),
+                  if (_prepEnabled)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked = await _pickTime(_prepTime);
+                            if (picked == null) return;
+                            setState(() => _prepTime = picked);
+                            final svc =
+                                ref.read(reminderPrefsServiceProvider);
+                            await svc.setPrepTime(picked);
+                            await _rescheduleReminders();
+                          },
+                          icon: const Icon(Icons.schedule),
+                          label: Text(
+                              '${_prepTime.hour.toString().padLeft(2, '0')}:${_prepTime.minute.toString().padLeft(2, '0')}'),
+                        ),
+                      ),
+                    ),
+
+                  const Divider(height: 1),
+
+                  // Replenish Pantry
+                  SwitchListTile(
+                    title: const Text('Replenish Pantry'),
+                    subtitle:
+                        const Text('Nudge to restock after shopping'),
+                    value: _replenishEnabled,
+                    onChanged: (v) async {
+                      setState(() => _replenishEnabled = v);
+                      final svc = ref.read(reminderPrefsServiceProvider);
+                      await svc.setReplenishEnabled(v);
+                      await _rescheduleReminders();
+                    },
+                    secondary: const Icon(Icons.inventory_2_outlined),
+                  ),
+                  if (_replenishEnabled)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final picked =
+                                await _pickTime(_replenishTime);
+                            if (picked == null) return;
+                            setState(() => _replenishTime = picked);
+                            final svc =
+                                ref.read(reminderPrefsServiceProvider);
+                            await svc.setReplenishTime(picked);
+                            await _rescheduleReminders();
+                          },
+                          icon: const Icon(Icons.schedule),
+                          label: Text(
+                              '${_replenishTime.hour.toString().padLeft(2, '0')}:${_replenishTime.minute.toString().padLeft(2, '0')}'),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
 
           const SizedBox(height: 16),
 

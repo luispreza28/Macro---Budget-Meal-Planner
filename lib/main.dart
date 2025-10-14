@@ -9,6 +9,7 @@ import 'core/utils/app_lifecycle_manager.dart';
 import 'core/utils/performance_monitor.dart';
 import 'presentation/router/app_router.dart';
 import 'presentation/providers/database_providers.dart';
+import 'domain/services/reminder_scheduler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,6 +45,11 @@ void main() async {
         child: const MacroBudgetMealPlannerApp(),
       ),
     );
+
+    // Schedule reminders after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      container.read(reminderSchedulerProvider).rescheduleAll();
+    });
 
     AppLogger.i('Application launched successfully');
   } catch (e, stackTrace) {
