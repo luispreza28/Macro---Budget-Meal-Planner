@@ -1,0 +1,57 @@
+class StoreProfile {
+  final String id; // uuid
+  final String name; // "Trader Joe's"
+  final String? emoji; // "🧺"
+  final List<String> aisleOrder; // must cover Aisle enum values; extras ignored
+  final Map<String, int>? priceOverrideCentsByIngredientId; // optional v1
+
+  const StoreProfile({
+    required this.id,
+    required this.name,
+    this.emoji,
+    required this.aisleOrder,
+    this.priceOverrideCentsByIngredientId,
+  });
+
+  StoreProfile copyWith({
+    String? name,
+    String? emoji,
+    List<String>? aisleOrder,
+    Map<String, int>? priceOverrideCentsByIngredientId,
+  }) {
+    return StoreProfile(
+      id: id,
+      name: name ?? this.name,
+      emoji: emoji ?? this.emoji,
+      aisleOrder: aisleOrder ?? this.aisleOrder,
+      priceOverrideCentsByIngredientId:
+          priceOverrideCentsByIngredientId ?? this.priceOverrideCentsByIngredientId,
+    );
+  }
+
+  factory StoreProfile.fromJson(Map<String, dynamic> j) {
+    return StoreProfile(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      emoji: j['emoji'] as String?,
+      aisleOrder: (j['aisleOrder'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+      priceOverrideCentsByIngredientId:
+          (j['priceOverrideCentsByIngredientId'] as Map?)?.map(
+        (key, value) => MapEntry(key.toString(), (value as num).toInt()),
+      ),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'emoji': emoji,
+      'aisleOrder': aisleOrder,
+      'priceOverrideCentsByIngredientId': priceOverrideCentsByIngredientId,
+    };
+  }
+}
+

@@ -99,6 +99,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 16),
 
+          // Shopping section
+          _buildSectionHeader('Shopping'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.store_mall_directory_outlined),
+                  title: const Text('Store Profiles'),
+                  subtitle: const Text('Manage stores and aisle order'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push(AppRouter.storeProfiles),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Variety & Repetition Section
           _buildSectionHeader('Variety & Repetition'),
           if (_loadingVariety)

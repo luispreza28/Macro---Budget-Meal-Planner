@@ -11,6 +11,10 @@ import '../../providers/shopping_list_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../providers/plan_providers.dart';
 import '../../../domain/services/replenish_service.dart';
+import '../../providers/store_providers.dart';
+import '../../../domain/services/store_profile_service.dart';
+import '../../../domain/services/trip_cost_service.dart';
+import 'package:intl/intl.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -57,8 +61,9 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
   Widget build(BuildContext context) {
     // IMPORTANT: shoppingListItemsProvider resolves asynchronously via FutureProvider.
     final groupedAsync = ref.watch(shoppingListItemsProvider);
-    final groupedData =
-        groupedAsync.asData?.value ?? const <ShoppingAisleGroup>[];
+    final groupedData = groupedAsync.asData?.value ?? const <ShoppingAisleGroup>[];
+    final storeAsync = ref.watch(selectedStoreProvider);
+    final profilesAsync = ref.watch(storeProfilesProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -102,6 +107,17 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
           message: 'Failed to load shopping list data. ${error.toString()}',
         ),
         data: (grouped) {
+          // Order sections by selected store aisle order
+          final store = storeAsync.value;
+          final defaultOrder = ing.Aisle.values.map((a) => a.value).toList();
+          final order = store?.aisleOrder ?? defaultOrder;
+          final sortedGroups = [...grouped];
+          int idxOf(ing.Aisle a) {
+            final i = order.indexOf(a.value);
+            return i < 0 ? 999 : i;
+          }
+          sortedGroups.sort((a, b) => idxOf(a.aisle).compareTo(idxOf(b.aisle)));
+
           if (grouped.isEmpty) {
             final debug = ref
                 .watch(shoppingListDebugProvider)
@@ -113,11 +129,11 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
             );
           }
 
-          final totalItems = grouped.fold<int>(
+          final totalItems = sortedGroups.fold<int>(
             0,
             (sum, g) => sum + g.items.length,
           );
-          final summary = grouped
+          final summary = sortedGroups
               .map(
                 (g) => _AisleSummary(
                   aisleLabel: _aisleDisplayName(g.aisle),
@@ -218,24 +234,29 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                       ),
                     ),
                     const Spacer(),
-                    const Icon(Icons.store_mall_directory_outlined, size: 18),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Grouped by aisle',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    _StoreSwitcher(
+                      profilesAsync: profilesAsync,
+                      selectedStoreAsync: storeAsync,
+                      onChanged: (id) async {
+                        await ref.read(storeProfileServiceProvider).setSelected(id);
+                        ref.invalidate(selectedStoreProvider);
+                      },
                     ),
                   ],
                 ),
+              ),
+              // Trip total
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: _TripTotalBar(groups: sortedGroups, checked: _checked, store: storeAsync.value),
               ),
               const SizedBox(height: 8),
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  itemCount: grouped.length,
+                  itemCount: sortedGroups.length,
                   itemBuilder: (context, sectionIndex) {
-                    final group = grouped[sectionIndex];
+                    final group = sortedGroups[sectionIndex];
                     final title = _aisleDisplayName(group.aisle);
                     final items = group.items;
 
@@ -481,6 +502,128 @@ class _AisleSection extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _StoreSwitcher extends StatelessWidget {
+  const _StoreSwitcher({
+    required this.profilesAsync,
+    required this.selectedStoreAsync,
+    required this.onChanged,
+  });
+  final AsyncValue<List<dynamic>> profilesAsync; // List<StoreProfile>
+  final AsyncValue<dynamic> selectedStoreAsync; // StoreProfile?
+  final Future<void> Function(String id) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return profilesAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, st) => const SizedBox.shrink(),
+      data: (profiles) {
+        final selected = selectedStoreAsync.value;
+        final label = selected != null
+            ? '${selected.emoji ?? '🏬'} ${selected.name}'
+            : 'Default order';
+        return PopupMenuButton<String>(
+          tooltip: 'Select store',
+          child: Row(
+            children: [
+              const Icon(Icons.store_mall_directory_outlined, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const Icon(Icons.arrow_drop_down),
+            ],
+          ),
+          itemBuilder: (context) {
+            final items = <PopupMenuEntry<String>>[];
+            items.add(const PopupMenuItem<String>(
+              value: '',
+              child: Text('Default order'),
+            ));
+            for (final p in profiles) {
+              items.add(
+                PopupMenuItem<String>(
+                  value: p.id,
+                  child: Text('${p.emoji ?? '🏬'} ${p.name}'),
+                ),
+              );
+            }
+            return items;
+          },
+          onSelected: (id) async {
+            if (id.isEmpty) {
+              // Clear selection
+              await onChanged('');
+            } else {
+              await onChanged(id);
+            }
+          },
+        );
+      },
+    );
+  }
+}
+
+class _TripTotalBar extends ConsumerWidget {
+  const _TripTotalBar({required this.groups, required this.checked, required this.store});
+  final List<ShoppingAisleGroup> groups;
+  final Set<String> checked;
+  final dynamic store; // StoreProfile?
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Flatten items; optionally exclude checked
+    final flat = <({String ingredientId, double qty, ing.Unit unit})>[];
+    for (final g in groups) {
+      for (final it in g.items) {
+        final key = '${it.ingredient.id}|${it.unit.name}';
+        if (checked.contains(key)) continue; // pending to buy only
+        flat.add((ingredientId: it.ingredient.id, qty: it.totalQty, unit: it.unit));
+      }
+    }
+
+    if (flat.isEmpty) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          'Estimated Trip Total: \$0.00',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+      );
+    }
+
+    final ingById = <String, ing.Ingredient>{};
+    for (final g in groups) {
+      for (final it in g.items) {
+        ingById[it.ingredient.id] = it.ingredient;
+      }
+    }
+
+    return FutureBuilder<int>(
+      future: ref.read(tripCostServiceProvider).computeTripTotalCents(
+            items: flat,
+            store: store,
+            ingredientsById: ingById,
+          ),
+      builder: (context, snapshot) {
+        final cents = snapshot.data ?? 0;
+        final fmt = NumberFormat.currency(symbol: '\$');
+        final totalStr = fmt.format(cents / 100);
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            'Estimated Trip Total: $totalStr',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+        );
+      },
     );
   }
 }
