@@ -5,7 +5,10 @@ import '../../../domain/entities/plan.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../../domain/entities/ingredient.dart'; // NEW
 import 'meal_card.dart';
+import 'shortfall_fixit_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/shortfall_providers.dart';
+// note: Consumer used locally for pins and shortfalls
 import '../../providers/plan_pin_providers.dart';
 import '../../../domain/services/plan_pin_service.dart';
 
@@ -222,6 +225,53 @@ class _MealsRow extends StatelessWidget {
                             isSelected: isSelected,
                             ingredientNameById: ingredientNameById,
                             onInfoTap: () => context.push('/recipe/${recipe.id}'),
+                          ),
+                          // Fix It badge if shortfall exists
+                          Positioned(
+                            top: 2,
+                            left: 2,
+                            child: Consumer(
+                              builder: (context, ref, _) {
+                                final servingsInt = meal.servings.round();
+                                final async = ref.watch(
+                                  mealShortfallProvider((recipeId: recipe.id, servingsForMeal: servingsInt)),
+                                );
+                                final ms = async.asData?.value;
+                                final hasShortfall = (ms != null) && (ms.coverageRatio < 1.0) && ms.lines.isNotEmpty;
+                                if (!hasShortfall) return const SizedBox.shrink();
+                                return Tooltip(
+                                  message: 'Fix It',
+                                  child: InkWell(
+                                    onTap: () {
+                                      showModalBottomSheet(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        showDragHandle: true,
+                                        builder: (_) => ShortfallFixItSheet(
+                                          recipeId: recipe.id,
+                                          servingsForMeal: servingsInt,
+                                          onSwapRequested: () => onMealTap(mealIndex),
+                                        ),
+                                      );
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.errorContainer,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        'Fix It',
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                              color: Theme.of(context).colorScheme.onErrorContainer,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                           // Pin badge
                           if (pinned)

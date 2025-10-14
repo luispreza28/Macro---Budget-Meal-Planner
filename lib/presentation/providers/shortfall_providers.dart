@@ -6,6 +6,8 @@ import '../../domain/services/pantry_shortfall_service.dart';
 import '../../domain/value/shortfall_item.dart';
 import 'plan_providers.dart';
 import 'recipe_providers.dart';
+import '../../domain/services/shortfall_service.dart';
+import '../../domain/services/shortfall_service.dart' as v2;
 
 final shortfallForRecipeProvider =
     FutureProvider.family<List<ShortfallItem>, String>((ref, recipeId) async {
@@ -23,3 +25,10 @@ final shortfallForCurrentPlanProvider =
   return svc.shortfallForPlan(plan);
 });
 
+/// Per-meal shortfall with unit-aligned deltas and coverage ratio.
+final mealShortfallProvider = FutureProvider.family<MealShortfall, ({String recipeId, int servingsForMeal})>((ref, args) async {
+  final recipes = await ref.watch(allRecipesProvider.future);
+  final r = recipes.firstWhere((e) => e.id == args.recipeId);
+  final svc = ref.read(shortfallServiceProvider);
+  return svc.compute(recipe: r, servingsForMeal: args.servingsForMeal);
+});
