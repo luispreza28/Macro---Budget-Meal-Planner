@@ -47,6 +47,41 @@ class TripCostService {
     return total;
   }
 
+  /// Compute totals for all provided stores using the same item list.
+  /// Does not include a baseline entry here; callers can compute baseline via
+  /// [computeTripTotalCents] with store=null if desired.
+  Future<List<StoreQuote>> quoteAllStores({
+    required List<({String ingredientId, double qty, Unit unit})> items,
+    required List<StoreProfile> stores,
+    Map<String, Ingredient>? ingredientsById,
+  }) async {
+    if (items.isEmpty) return const [];
+
+    // Ensure we have an ingredient cache to avoid repeated lookups.
+    final byId = ingredientsById ?? {for (final i in <Ingredient>[]) i.id: i};
+
+    final List<StoreQuote> out = [];
+    for (final s in stores) {
+      final total = await computeTripTotalCents(
+        items: items,
+        store: s,
+        ingredientsById: byId,
+      );
+      if (kDebugMode) {
+        debugPrint('[TripCost] quote store=${s.name} total=$total');
+      }
+      out.add(
+        StoreQuote(
+          storeId: s.id,
+          displayName: '${s.emoji ?? '🧺'} ${s.name}',
+          totalCents: total,
+        ),
+      );
+    }
+
+    return out;
+  }
+
   /// Unit-aware price retrieval: returns cents for qty in item.unit
   int priceCentsFor({
     required Ingredient ing,
@@ -96,3 +131,13 @@ class TripCostService {
   }
 }
 
+class StoreQuote {
+  final String? storeId; // null = Baseline (no store / default prices)
+  final String displayName; // e.g., "🧺 Trader Joe's" or "Baseline"
+  final int totalCents;
+  const StoreQuote({
+    required this.storeId,
+    required this.displayName,
+    required this.totalCents,
+  });
+}

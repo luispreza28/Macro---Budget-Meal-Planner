@@ -15,6 +15,7 @@ import '../../providers/store_providers.dart';
 import '../../../domain/services/store_profile_service.dart';
 import '../../../domain/services/trip_cost_service.dart';
 import 'package:intl/intl.dart';
+import '../../providers/store_compare_providers.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -95,6 +96,8 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                 : () {
                     setState(() => _checked.clear());
                     _saveCheckedForPlan();
+                    // Keep compare totals in sync with checked state
+                    ref.invalidate(storeQuotesProvider);
                   },
             icon: const Icon(Icons.checklist_rtl_outlined),
           ),
@@ -240,10 +243,17 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                       onChanged: (id) async {
                         await ref.read(storeProfileServiceProvider).setSelected(id);
                         ref.invalidate(selectedStoreProvider);
+                        ref.invalidate(storeQuotesProvider);
+                        ref.invalidate(shoppingListItemsProvider);
                       },
                     ),
                   ],
                 ),
+              ),
+              // Cheapest store banner
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                child: _CheapestStoreBanner(),
               ),
               // Trip total
               Padding(
@@ -328,6 +338,8 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
       }
     });
     _saveCheckedForPlan();
+    // Keep compare totals in sync with checked state
+    ref.invalidate(storeQuotesProvider);
   }
 
   String _itemKey(AggregatedShoppingItem i) =>
@@ -626,6 +638,141 @@ class _TripTotalBar extends ConsumerWidget {
       },
     );
   }
+}
+
+class _CheapestStoreBanner extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedAsync = ref.watch(selectedStoreProvider);
+    final quotesAsync = ref.watch(storeQuotesProvider);
+
+    return quotesAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, st) => const SizedBox.shrink(),
+      data: (quotes) {
+        if (quotes.isEmpty) return const SizedBox.shrink();
+        final selected = selectedAsync.value;
+        final currentId = selected?.id; // null => baseline
+        final current = quotes.firstWhere(
+          (q) => q.storeId == currentId,
+          orElse: () => quotes.firstWhere((q) => q.storeId == null, orElse: () => quotes.first),
+        );
+        final sorted = [...quotes]..sort((a, b) => a.totalCents.compareTo(b.totalCents));
+        final cheapest = sorted.first;
+
+        if (cheapest.totalCents >= current.totalCents || cheapest.storeId == currentId) {
+          return const SizedBox.shrink();
+        }
+
+        final savings = current.totalCents - cheapest.totalCents;
+        final fmt = NumberFormat.currency(symbol: '\$');
+        return Card(
+          color: Theme.of(context).colorScheme.surfaceVariant,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Cheapest for this trip: ${cheapest.displayName}',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Save ~${fmt.format(savings / 100)} vs current',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () async {
+                    final svc = ref.read(storeProfileServiceProvider);
+                    await svc.setSelected(cheapest.storeId ?? '');
+                    ref.invalidate(selectedStoreProvider);
+                    ref.invalidate(storeQuotesProvider);
+                    ref.invalidate(shoppingListItemsProvider);
+                  },
+                  child: const Text('Switch'),
+                ),
+                TextButton(
+                  onPressed: () => _showCompareStoresModal(context, ref),
+                  child: const Text('Compare'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+void _showCompareStoresModal(BuildContext context, WidgetRef ref) {
+  showModalBottomSheet(
+    context: context,
+    builder: (ctx) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Consumer(
+            builder: (context, ref, _) {
+              final selected = ref.watch(selectedStoreProvider).value;
+              final quotesAsync = ref.watch(storeQuotesProvider);
+              final fmt = NumberFormat.currency(symbol: '\$');
+              return quotesAsync.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (e, st) => Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Failed to load store quotes'),
+                ),
+                data: (quotes) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ...quotes.map((q) {
+                        final isSelected = (selected?.id ?? null) == q.storeId;
+                        return ListTile(
+                          leading: isSelected ? const Icon(Icons.check) : const SizedBox(width: 24),
+                          title: Text(q.displayName),
+                          trailing: Text(fmt.format(q.totalCents / 100)),
+                          onTap: () async {
+                            final svc = ref.read(storeProfileServiceProvider);
+                            await svc.setSelected(q.storeId ?? '');
+                            ref.invalidate(selectedStoreProvider);
+                            ref.invalidate(storeQuotesProvider);
+                            ref.invalidate(shoppingListItemsProvider);
+                            if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                          },
+                        );
+                      }),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Prices use store overrides when available; others use default pack prices.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _EmptyView extends StatelessWidget {
