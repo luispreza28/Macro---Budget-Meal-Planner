@@ -19,6 +19,9 @@ import '../../providers/shortfall_providers.dart';
 import '../../providers/insights_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../providers/meal_log_providers.dart';
+import '../../providers/prepared_providers.dart';
+import '../../../domain/services/prepared_inventory_service.dart';
+import 'package:intl/intl.dart';
 
 class CookModePage extends ConsumerStatefulWidget {
   const CookModePage({super.key, required this.planMealId});
@@ -352,6 +355,49 @@ class _CookModePageState extends ConsumerState<CookModePage> {
         ),
       );
       if (kDebugMode) debugPrint('[CookMode] Deducted and logged cook event');
+
+      // After marking cooked, ask how many servings were eaten now and save leftovers
+      if (!mounted) return;
+      final ate = await showModalBottomSheet<_PostCookResult>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (_) => _PostCookSheet(
+          maxServings: _servingsCooked,
+        ),
+      );
+      if (ate != null) {
+        final left = (_servingsCooked - ate.servingsAteNow).clamp(0, _servingsCooked);
+        if (left > 0) {
+          final expires = ate.expiresAt;
+          final storage = ate.storage;
+          await ref.read(preparedInventoryServiceProvider).add(
+                recipe.id,
+                PreparedEntry(
+                  servings: left,
+                  madeAt: DateTime.now(),
+                  expiresAt: expires,
+                  storage: storage,
+                ),
+              );
+          ref.invalidate(preparedServingsProvider(recipe.id));
+          ref.invalidate(preparedEntriesProvider(recipe.id));
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Saved $left leftover servings'),
+              action: SnackBarAction(
+                label: 'Undo',
+                onPressed: () async {
+                  await ref.read(preparedInventoryServiceProvider).consume(recipe.id, left);
+                  ref.invalidate(preparedServingsProvider(recipe.id));
+                  ref.invalidate(preparedEntriesProvider(recipe.id));
+                },
+              ),
+            ),
+          );
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
@@ -433,3 +479,117 @@ class _TimerPickerSheet extends StatelessWidget {
   }
 }
 
+// ---------- Post-cook leftovers sheet ----------
+
+class _PostCookResult {
+  _PostCookResult({required this.servingsAteNow, required this.storage, required this.expiresAt});
+  final int servingsAteNow;
+  final Storage storage;
+  final DateTime? expiresAt;
+}
+
+class _PostCookSheet extends StatefulWidget {
+  const _PostCookSheet({required this.maxServings});
+  final int maxServings;
+  @override
+  State<_PostCookSheet> createState() => _PostCookSheetState();
+}
+
+class _PostCookSheetState extends State<_PostCookSheet> {
+  int _ate = 0; // can be 0..max
+  Storage _storage = Storage.fridge;
+  DateTime? _expiry;
+
+  @override
+  void initState() {
+    super.initState();
+    _storage = Storage.fridge;
+    _expiry = DateTime.now().add(const Duration(days: 3));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final left = (widget.maxServings - _ate).clamp(0, widget.maxServings);
+    final df = DateFormat.yMMMd();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(left: 16, right: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16, top: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('How many servings did you eat now?', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                IconButton(onPressed: () => setState(() => _ate = (_ate - 1).clamp(0, widget.maxServings)), icon: const Icon(Icons.remove_circle_outline)),
+                Text('$_ate / ${widget.maxServings}', style: Theme.of(context).textTheme.titleLarge),
+                IconButton(onPressed: () => setState(() => _ate = (_ate + 1).clamp(0, widget.maxServings)), icon: const Icon(Icons.add_circle_outline)),
+                const Spacer(),
+                Text('Leftovers: $left', style: Theme.of(context).textTheme.labelLarge),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('Storage', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Fridge (+3d)'),
+                  selected: _storage == Storage.fridge,
+                  onSelected: (_) => setState(() {
+                    _storage = Storage.fridge;
+                    _expiry = DateTime.now().add(const Duration(days: 3));
+                  }),
+                ),
+                ChoiceChip(
+                  label: const Text('Freezer (+30d)'),
+                  selected: _storage == Storage.freezer,
+                  onSelected: (_) => setState(() {
+                    _storage = Storage.freezer;
+                    _expiry = DateTime.now().add(const Duration(days: 30));
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text('Expiry: ', style: Theme.of(context).textTheme.bodyMedium),
+                Text(_expiry == null ? 'None' : df.format(_expiry!), style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () async {
+                    final now = DateTime.now();
+                    final picked = await showDatePicker(
+                      context: context,
+                      firstDate: now,
+                      lastDate: now.add(const Duration(days: 365)),
+                      initialDate: _expiry ?? now.add(const Duration(days: 3)),
+                    );
+                    if (picked != null) setState(() => _expiry = picked);
+                  },
+                  child: const Text('Pick date'),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => setState(() => _expiry = null),
+                  child: const Text('No expiry'),
+                )
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(_PostCookResult(servingsAteNow: _ate, storage: _storage, expiresAt: _expiry)),
+                child: const Text('Save'),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}

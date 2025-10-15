@@ -163,6 +163,11 @@ class _PantryPageState extends ConsumerState<PantryPage> {
                 icon: const Icon(Icons.add),
                 tooltip: 'Add Item',
               ),
+              TextButton.icon(
+                onPressed: () => context.push('/prepared'),
+                icon: const Icon(Icons.kitchen),
+                label: const Text('Prepared / Leftovers'),
+              ),
               PopupMenuButton(
                 itemBuilder: (context) => const [
                   PopupMenuItem(

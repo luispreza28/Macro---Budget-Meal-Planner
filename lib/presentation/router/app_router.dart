@@ -8,6 +8,7 @@ import '../pages/home/home_page.dart';
 import '../pages/plan/plan_page.dart';
 import '../pages/shopping/shopping_list_page.dart';
 import '../pages/pantry/pantry_page.dart';
+import '../pages/pantry/prepared_page.dart';
 import '../pages/settings/settings_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
@@ -44,6 +45,7 @@ class AppRouter {
   static const String plan = '/plan';
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
+  static const String prepared = '/prepared';
   static const String settings = '/settings';
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
@@ -90,6 +92,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const PantryPage(),
+      ),
+    ),
+    GoRoute(
+      path: prepared,
+      name: 'prepared',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const PreparedPage(),
       ),
     ),
     GoRoute(

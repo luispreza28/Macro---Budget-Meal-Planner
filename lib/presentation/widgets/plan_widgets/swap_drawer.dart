@@ -12,6 +12,7 @@ import '../../providers/substitution_providers.dart';
 import '../../../domain/value/substitution_score.dart';
 import '../../providers/diet_allergen_providers.dart';
 import '../../../domain/services/allergen_classifier.dart';
+import '../../providers/prepared_providers.dart';
 
 /// Bottom drawer for showing meal swap options
 class SwapDrawer extends ConsumerStatefulWidget {
@@ -246,6 +247,7 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                   final set = AllergenClassifier.allergensForRecipe(r, ingById);
                   allergenConflict = set.any((a) => pickedAllergens.contains(a));
                 }
+                final n = ref.watch(preparedServingsProvider(r.id)).valueOrNull ?? 0;
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: Padding(
@@ -290,6 +292,22 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                           spacing: 6,
                           runSpacing: 4,
                           children: [
+                            if (n > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.kitchen, size: 12),
+                                    const SizedBox(width: 4),
+                                    Text('uses leftovers', style: Theme.of(context).textTheme.labelSmall),
+                                  ],
+                                ),
+                              ),
                             if (!strict && (violatesDiet || allergenConflict))
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

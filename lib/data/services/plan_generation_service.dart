@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/services/pantry_utilization_service.dart';
+import '../../domain/services/prepared_inventory_service.dart';
 
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/plan.dart';
@@ -132,7 +133,20 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
     if (fb > 0 && kDebugMode) {
       debugPrint('[GenBias] applying favorite bias: $fb (favs=${favs.length})');
     }
-    if (doCost || fb > 0) {
+    // Preload prepared leftovers counts for light bias
+    final Map<String, List<PreparedEntry>> preparedMap =
+        (_ref != null) ? await _ref!.read(preparedInventoryServiceProvider).all() : {};
+    int leftoversFor(String recipeId) {
+      final now = DateTime.now();
+      final xs = preparedMap[recipeId] ?? const <PreparedEntry>[];
+      int sum = 0;
+      for (final e in xs) {
+        if (e.expiresAt == null || e.expiresAt!.isAfter(now)) sum += e.servings;
+      }
+      return sum;
+    }
+
+    if (doCost || fb > 0 || preparedMap.isNotEmpty) {
       for (final r in pool) {
         final base = rng.nextDouble();
         double score = base;
@@ -145,6 +159,12 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
         if (fb > 0) {
           final isFav = favs.contains(r.id) ? 1.0 : 0.0;
           score += fb * isFav;
+        }
+        // Leftovers light bonus: up to +0.15 when leftovers >=2
+        final lo = leftoversFor(r.id);
+        if (lo > 0) {
+          final bonus = 0.15 * (lo >= 2 ? 1.0 : (lo / 2.0));
+          score += bonus;
         }
         baseScores[r.id] = score;
       }

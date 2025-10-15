@@ -6,6 +6,7 @@ import '../../domain/services/pantry_utilization_service.dart';
 import '../providers/plan_providers.dart';
 import '../providers/database_providers.dart';
 import '../providers/recipe_providers.dart';
+import '../../domain/services/insights_service.dart';
 
 // Recent plans for insights (limit 6)
 final insightsRecentPlansProvider = FutureProvider<List<Plan>>((ref) async {
@@ -65,3 +66,7 @@ final anyShortfallsThisWeekProvider = FutureProvider<bool>((ref) async {
   return false;
 });
 
+// Leftovers rescued this week
+final insightsLeftoversRescuedProvider = FutureProvider<int>((ref) async {
+  return ref.read(insightsServiceProvider).leftoversUsedThisWeek();
+});

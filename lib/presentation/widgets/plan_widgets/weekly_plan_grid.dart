@@ -226,6 +226,9 @@ class _MealsRow extends StatelessWidget {
                             isSelected: isSelected,
                             ingredientNameById: ingredientNameById,
                             onInfoTap: () => context.push('/recipe/${recipe.id}'),
+                            planId: planId,
+                            slotId: slotKey,
+                            servingsForMeal: meal.servings.round(),
                           ),
                           // Fix It badge if shortfall exists
                           Positioned(

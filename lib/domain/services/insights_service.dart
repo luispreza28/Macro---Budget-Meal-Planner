@@ -9,6 +9,7 @@ import '../services/pantry_utilization_service.dart';
 import '../services/trip_cost_service.dart';
 import '../services/variety_prefs_service.dart';
 import '../services/recipe_features.dart';
+import '../services/prepared_inventory_service.dart';
 import '../../presentation/providers/database_providers.dart';
 import '../../presentation/providers/user_targets_providers.dart';
 import '../../presentation/providers/store_providers.dart';
@@ -300,6 +301,11 @@ class InsightsService {
     return TopMovers(mostUsedRecipeIds: most, leastUsedRecipeIds: least);
   }
 
+  // Leftovers: servings rescued this week (from PreparedInventoryService counter)
+  Future<int> leftoversUsedThisWeek() async {
+    return ref.read(preparedInventoryServiceProvider).rescuedThisWeek();
+  }
+
   Future<UserTargets> _targetsForPlan(Plan plan) async {
     final repo = ref.read(userTargetsRepositoryProvider);
     final t = await repo.getUserTargetsById(plan.userTargetsId);
@@ -349,4 +355,3 @@ class TopMovers {
   final List<String> leastUsedRecipeIds; // bottom 3 among used
   const TopMovers({required this.mostUsedRecipeIds, required this.leastUsedRecipeIds});
 }
-

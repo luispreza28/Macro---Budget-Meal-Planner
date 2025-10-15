@@ -11,7 +11,7 @@ class PantryUsageCard extends ConsumerWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
-        height: 140,
+        height: 160,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: async.when(
@@ -19,6 +19,8 @@ class PantryUsageCard extends ConsumerWidget {
             error: (e, _) => Text('Pantry usage failed: $e', style: Theme.of(context).textTheme.labelSmall),
             data: (p) {
               final pct = (p.coverageRatio * 100).round();
+              final rescuedAsync = ref.watch(insightsLeftoversRescuedProvider);
+              final rescued = rescuedAsync.asData?.value ?? 0;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -27,6 +29,8 @@ class PantryUsageCard extends ConsumerWidget {
                   Text('$pct%', style: Theme.of(context).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 4),
                   Text('covered by pantry inputs', style: Theme.of(context).textTheme.labelSmall),
+                  const Spacer(),
+                  Text('Servings rescued: $rescued', style: Theme.of(context).textTheme.labelMedium),
                 ],
               );
             },
@@ -36,4 +40,3 @@ class PantryUsageCard extends ConsumerWidget {
     );
   }
 }
-

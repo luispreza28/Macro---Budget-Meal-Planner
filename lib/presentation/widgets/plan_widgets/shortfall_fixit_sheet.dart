@@ -11,6 +11,10 @@ import '../../providers/plan_providers.dart';
 import '../../providers/pantry_providers.dart';
 import '../../../domain/value/shortfall_item.dart' as v1;
 import '../../../domain/services/unit_align.dart';
+import '../../providers/prepared_providers.dart';
+import '../../../domain/services/prepared_inventory_service.dart';
+import '../../providers/plan_providers.dart';
+import '../../providers/shopping_list_providers.dart';
 
 class ShortfallFixItSheet extends ConsumerWidget {
   const ShortfallFixItSheet({
@@ -77,6 +81,54 @@ class ShortfallFixItSheet extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    // Use leftovers quick action when available
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final n = ref.watch(preparedServingsProvider(recipeId)).valueOrNull ?? 0;
+                        if (n <= 0) {
+                          return const SizedBox.shrink();
+                        }
+                        final maxUse = (servingsForMeal).clamp(1, n);
+                        return OutlinedButton.icon(
+                          icon: const Icon(Icons.kitchen),
+                          label: Text('Use leftovers (up to $maxUse)'),
+                          onPressed: () async {
+                            final chosen = await showDialog<int>(
+                              context: context,
+                              builder: (_) => _PickIntDialog(title: 'Servings to use', max: maxUse),
+                            );
+                            if (chosen == null || chosen <= 0) return;
+                            await ref.read(preparedInventoryServiceProvider).consume(recipeId, chosen);
+                            ref.invalidate(preparedServingsProvider(recipeId));
+                            ref.invalidate(mealShortfallProvider((recipeId: recipeId, servingsForMeal: servingsForMeal)));
+                            ref.invalidate(shoppingListItemsProvider);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Using leftovers for $chosen serving(s)'),
+                                action: SnackBarAction(
+                                  label: 'Undo',
+                                  onPressed: () async {
+                                    await ref.read(preparedInventoryServiceProvider).add(
+                                          recipeId,
+                                          PreparedEntry(
+                                            servings: chosen,
+                                            madeAt: DateTime.now(),
+                                            expiresAt: DateTime.now().add(const Duration(days: 3)),
+                                            storage: Storage.fridge,
+                                          ),
+                                        );
+                                    ref.invalidate(preparedServingsProvider(recipeId));
+                                    ref.invalidate(mealShortfallProvider((recipeId: recipeId, servingsForMeal: servingsForMeal)));
+                                    ref.invalidate(shoppingListItemsProvider);
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
                     FilledButton.icon(
                       onPressed: lines.isEmpty ? null : () async {
                         await _addAllToShopping(context, ref, lines);
@@ -323,5 +375,35 @@ class ShortfallFixItSheet extends ConsumerWidget {
       case Unit.piece:
         return '$s pc';
     }
+  }
+}
+
+class _PickIntDialog extends StatefulWidget {
+  const _PickIntDialog({required this.title, required this.max});
+  final String title;
+  final int max;
+  @override
+  State<_PickIntDialog> createState() => _PickIntDialogState();
+}
+
+class _PickIntDialogState extends State<_PickIntDialog> {
+  int _v = 1;
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(onPressed: () => setState(() => _v = (_v - 1).clamp(1, widget.max)), icon: const Icon(Icons.remove_circle_outline)),
+          Text('$_v / ${widget.max}', style: Theme.of(context).textTheme.titleMedium),
+          IconButton(onPressed: () => setState(() => _v = (_v + 1).clamp(1, widget.max)), icon: const Icon(Icons.add_circle_outline)),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.of(context).pop(_v), child: const Text('Confirm')),
+      ],
+    );
   }
 }

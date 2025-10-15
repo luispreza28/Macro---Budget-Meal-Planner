@@ -7,6 +7,7 @@ import '../providers/plan_providers.dart';
 import '../providers/recipe_providers.dart';
 import '../providers/ingredient_providers.dart';
 import 'dart:convert';
+import '../../domain/services/leftover_commit_service.dart';
 
 class AggregatedShoppingItem {
   AggregatedShoppingItem({
@@ -64,10 +65,23 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
   // Aggregate by ingredient + unit to support separate lines for different units.
   final Map<String, Map<ing.Unit, double>> totals = {};
 
-  for (final day in plan.days) {
-    for (final meal in day.meals) {
+  // Load leftover commitments once
+  final commitments = await ref.read(leftoverCommitServiceProvider).all();
+
+  for (var dIdx = 0; dIdx < plan.days.length; dIdx++) {
+    final day = plan.days[dIdx];
+    for (var mIdx = 0; mIdx < day.meals.length; mIdx++) {
+      final meal = day.meals[mIdx];
       final recipe = recipeById[meal.recipeId];
       if (recipe == null || recipe.items.isEmpty) continue;
+
+      // scale by committed leftovers for this slot
+      final slotKey = 'd${dIdx}-m${mIdx}';
+      final committed = commitments[plan.id]?[slotKey] ?? 0;
+      final servings = meal.servings;
+      final scale = servings <= 0
+          ? 1.0
+          : ((servings - committed).clamp(0, servings) / servings).toDouble();
 
       for (final item in recipe.items) {
         final ingMeta = ingredientById[item.ingredientId];
@@ -75,7 +89,7 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
 
         // Convert plan-derived items into ingredient base unit for consistency.
         final qtyInBase = _toIngredientUnit(
-          qty: item.qty * meal.servings,
+          qty: item.qty * servings * scale,
           from: item.unit,
           to: ingMeta.unit,
         );

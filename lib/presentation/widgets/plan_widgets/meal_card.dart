@@ -3,6 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../../domain/entities/ingredient.dart'; // Unit & Ingredient here\r\n\r\nconst bool kShowPantryBadges = false; // gate pantry badges
 import '../../providers/diet_allergen_providers.dart';
+import '../../providers/prepared_providers.dart';
+import '../../../domain/services/prepared_inventory_service.dart';
+import '../../../domain/services/leftover_commit_service.dart';
+import '../../providers/shopping_list_providers.dart';
+import '../../providers/insights_providers.dart';
 
 /// Card displaying a meal in the plan grid
 class MealCard extends ConsumerWidget {
@@ -17,6 +22,9 @@ class MealCard extends ConsumerWidget {
     this.isSelected = false,
     this.showMacros = true,
     this.ingredientNameById = const {},
+    this.planId,
+    this.slotId,
+    this.servingsForMeal,
   });
 
   final Recipe recipe;
@@ -32,6 +40,9 @@ class MealCard extends ConsumerWidget {
 
   /// Optional: ingredientId -> Ingredient (used to show nicer names if available)
   final Map<String, Ingredient> ingredients;
+  final String? planId;
+  final String? slotId; // expected 'd{day}-m{meal}'
+  final int? servingsForMeal;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -221,6 +232,11 @@ class MealCard extends ConsumerWidget {
 
                 const SizedBox(height: 8),
 
+                // Leftovers actions (if any)
+                _leftoversActions(context, ref),
+
+                const SizedBox(height: 8),
+
                 // Show measurements button
                 Align(
                   alignment: Alignment.centerRight,
@@ -246,6 +262,87 @@ class MealCard extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _leftoversActions(BuildContext context, WidgetRef ref) {
+    final n = ref.watch(preparedServingsProvider(recipe.id)).valueOrNull ?? 0;
+    if (n <= 0) return const SizedBox.shrink();
+    final canCommit = planId != null && slotId != null && (servingsForMeal ?? 0) > 0;
+    return Row(
+      children: [
+        InputChip(
+          label: Text('Use leftovers ($n)'),
+          avatar: const Icon(Icons.kitchen, size: 16),
+          onPressed: () async {
+            final maxUse = (servingsForMeal ?? n).clamp(1, n);
+            final chosen = await showDialog<int>(
+              context: context,
+              builder: (_) => _ServingsPickerDialog(title: 'Servings to use', max: maxUse),
+            );
+            if (chosen == null || chosen <= 0) return;
+            await ref.read(preparedInventoryServiceProvider).consume(recipe.id, chosen);
+            // Invalidate relevant providers
+            ref.invalidate(preparedServingsProvider(recipe.id));
+            ref.invalidate(preparedEntriesProvider(recipe.id));
+            ref.invalidate(shoppingListItemsProvider);
+            ref.invalidate(insightsPantryProvider);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Using leftovers for $chosen servings'),
+                action: SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () async {
+                    // Re-add servings (fridge, short expiry default)
+                    await ref.read(preparedInventoryServiceProvider).add(
+                          recipe.id,
+                          PreparedEntry(
+                            servings: chosen,
+                            madeAt: DateTime.now(),
+                            expiresAt: DateTime.now().add(const Duration(days: 3)),
+                            storage: Storage.fridge,
+                          ),
+                        );
+                    ref.invalidate(preparedServingsProvider(recipe.id));
+                    ref.invalidate(preparedEntriesProvider(recipe.id));
+                    ref.invalidate(shoppingListItemsProvider);
+                  },
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(width: 8),
+        if (canCommit)
+          OutlinedButton.icon(
+            icon: const Icon(Icons.event_available),
+            label: const Text('Commit leftovers'),
+            onPressed: () async {
+              final maxServ = (servingsForMeal ?? 0).clamp(1, 999);
+              final maxCommit = n.clamp(0, maxServ);
+              if (maxCommit <= 0) return;
+              final chosen = await showDialog<int>(
+                context: context,
+                builder: (_) => _ServingsPickerDialog(title: 'Commit servings', max: maxCommit),
+              );
+              if (chosen == null) return;
+              await ref.read(leftoverCommitServiceProvider).setCommitted(planId!, slotId!, chosen);
+              ref.invalidate(shoppingListItemsProvider);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Committed $chosen serving(s) to leftovers'),
+                  action: SnackBarAction(
+                    label: 'Undo',
+                    onPressed: () async {
+                      await ref.read(leftoverCommitServiceProvider).setCommitted(planId!, slotId!, 0);
+                      ref.invalidate(shoppingListItemsProvider);
+                    },
+                  ),
+                ),
+              );
+            },
+          ),
+      ],
     );
   }
 
@@ -407,6 +504,36 @@ class MealCard extends ConsumerWidget {
         final up = flag.toUpperCase();
         return up.length <= 3 ? up : up.substring(0, 3);
     }
+  }
+}
+
+class _ServingsPickerDialog extends StatefulWidget {
+  const _ServingsPickerDialog({required this.title, required this.max});
+  final String title;
+  final int max;
+  @override
+  State<_ServingsPickerDialog> createState() => _ServingsPickerDialogState();
+}
+
+class _ServingsPickerDialogState extends State<_ServingsPickerDialog> {
+  int _k = 1;
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(onPressed: () => setState(() => _k = (_k - 1).clamp(1, widget.max)), icon: const Icon(Icons.remove_circle_outline)),
+          Text('$_k / ${widget.max}', style: Theme.of(context).textTheme.titleMedium),
+          IconButton(onPressed: () => setState(() => _k = (_k + 1).clamp(1, widget.max)), icon: const Icon(Icons.add_circle_outline)),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.of(context).pop(_k), child: const Text('Confirm')),
+      ],
+    );
   }
 }
 
