@@ -12,6 +12,7 @@ class MealCard extends ConsumerWidget {
     required this.servings,
     required this.onTap,
     this.onInfoTap,
+    this.onCookTap,
     this.ingredients = const {}, // optional map for pretty names
     this.isSelected = false,
     this.showMacros = true,
@@ -22,6 +23,7 @@ class MealCard extends ConsumerWidget {
   final double servings;
   final VoidCallback onTap;
   final VoidCallback? onInfoTap;
+  final VoidCallback? onCookTap;
   final bool isSelected;
   final bool showMacros;
 
@@ -226,6 +228,15 @@ class MealCard extends ConsumerWidget {
                     onPressed: () => _showMeasurements(context),
                     icon: const Icon(Icons.scale),
                     label: const Text('Show measurements'),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: onCookTap,
+                    icon: const Icon(Icons.restaurant_menu),
+                    label: const Text('Cook'),
                   ),
                 ),
               ],

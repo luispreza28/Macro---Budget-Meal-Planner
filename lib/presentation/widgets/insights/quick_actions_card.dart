@@ -16,6 +16,7 @@ import '../plan_widgets/shortfall_fixit_sheet.dart';
 import '../../../domain/services/variety_options.dart';
 import '../../../domain/services/variety_prefs_service.dart';
 import '../../../domain/services/pantry_utilization_service.dart';
+import '../../providers/meal_log_providers.dart';
 
 class QuickActionsCard extends ConsumerWidget {
   const QuickActionsCard({super.key});
@@ -23,6 +24,7 @@ class QuickActionsCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final anyShortfalls = ref.watch(anyShortfallsThisWeekProvider);
+    final mealLogAsync = ref.watch(mealLogProvider);
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Padding(
@@ -32,6 +34,20 @@ class QuickActionsCard extends ConsumerWidget {
           children: [
             Text('Quick Actions', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
+            mealLogAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (entries) {
+                final now = DateTime.now();
+                final startOfWeek = now.subtract(Duration(days: (now.weekday - DateTime.monday)));
+                final start = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
+                final count = entries.where((e) => e.cookedAt.isAfter(start)).length;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text('Meals cooked this week: $count', style: Theme.of(context).textTheme.bodySmall),
+                );
+              },
+            ),
             Wrap(
               spacing: 12,
               runSpacing: 8,

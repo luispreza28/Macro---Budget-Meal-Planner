@@ -222,6 +222,7 @@ class _MealsRow extends StatelessWidget {
                             servings: meal.servings,
                             ingredients: ingredients, // NEW
                             onTap: () => onMealTap(mealIndex),
+                            onCookTap: () => context.push('/cook/$slotKey'),
                             isSelected: isSelected,
                             ingredientNameById: ingredientNameById,
                             onInfoTap: () => context.push('/recipe/${recipe.id}'),
