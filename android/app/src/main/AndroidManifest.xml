@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.CAMERA" />
     
     <!-- Internet permission for in-app purchases and optional analytics -->
     <uses-permission android:name="android.permission.INTERNET" />

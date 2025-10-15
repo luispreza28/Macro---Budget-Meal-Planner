@@ -12,6 +12,7 @@ import '../pages/settings/settings_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
 import '../pages/insights/weekly_insights_page.dart';
+import '../pages/scan/barcode_scan_page.dart';
 import '../providers/database_providers.dart';
 
 /// SharedPreferences flag for onboarding completion (v1)
@@ -46,6 +47,7 @@ class AppRouter {
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
   static const String insights = '/insights';
+  static const String scan = '/scan';
 
   static final List<GoRoute> _routes = [
     GoRoute(
@@ -120,6 +122,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const WeeklyInsightsPage(),
+      ),
+    ),
+    GoRoute(
+      path: scan,
+      name: 'scan',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const BarcodeScanPage(),
       ),
     ),
   ];
