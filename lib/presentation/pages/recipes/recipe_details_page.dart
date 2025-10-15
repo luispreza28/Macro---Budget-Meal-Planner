@@ -19,6 +19,8 @@ import '../../providers/shopping_list_providers.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_prefs_service.dart';
 import '../../providers/clipboard_providers.dart';
+import '../../providers/diet_allergen_providers.dart';
+import '../../../domain/services/allergen_classifier.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});
@@ -1414,6 +1416,17 @@ class _Header extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final reqDiet = ref.watch(dietFlagsPrefProvider).asData?.value ?? const <String>[];
+    final pickedAllergens = ref.watch(allergensPrefProvider).asData?.value ?? const <String>[];
+    final strict = ref.watch(strictModePrefProvider).asData?.value ?? true;
+    final ingredients = ref.watch(allIngredientsProvider).asData?.value;
+    bool dietMismatch = reqDiet.isNotEmpty && !recipe.isCompatibleWithDiet(reqDiet);
+    bool hasAllergen = false;
+    if (!dietMismatch && pickedAllergens.isNotEmpty && (ingredients != null)) {
+      final byId = {for (final i in ingredients) i.id: i};
+      final set = AllergenClassifier.allergensForRecipe(recipe, byId);
+      hasAllergen = set.any((a) => pickedAllergens.contains(a));
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1493,6 +1506,42 @@ class _Header extends ConsumerWidget {
               ),
             ],
             const SizedBox(height: 12),
+            if (dietMismatch || hasAllergen) ...[
+              Wrap(
+                spacing: 8,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.warning_amber_outlined, size: 14, color: Theme.of(context).colorScheme.onErrorContainer),
+                        const SizedBox(width: 4),
+                        Text(
+                          dietMismatch ? "Doesn't meet your diet" : 'Contains your allergen',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onErrorContainer,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (strict)
+                    Text(
+                      'Will be excluded in plan generation & swaps.',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
             Wrap(
               spacing: 12,
               runSpacing: 8,

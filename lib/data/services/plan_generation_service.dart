@@ -9,6 +9,8 @@ import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
 import '../../domain/entities/user_targets.dart';
 import '../../domain/services/recipe_features.dart';
+import '../../domain/services/allergen_classifier.dart';
+import '../../domain/services/diet_allergen_prefs_service.dart';
 import '../../domain/services/variety_options.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
@@ -36,6 +38,12 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
     }
 
     final ingById = ingredientsById ?? {for (final i in ingredients) i.id: i};
+
+    // Load diet/allergen guardrails (SharedPreferences-backed)
+    final prefsSvc = _ref?.read(dietAllergenPrefsServiceProvider);
+    final reqDiet = prefsSvc != null ? await prefsSvc.dietFlags() : const <String>[];
+    final selectedAllergens = prefsSvc != null ? await prefsSvc.allergens() : const <String>[];
+    final strict = prefsSvc != null ? await prefsSvc.strictMode() : true;
 
     final int mealsPerDay = targets.mealsPerDay.clamp(1, 6) as int;
     final rng = _rng;
@@ -88,8 +96,30 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
     final sampledItemized = _sample(itemized, targetItemized);
     final sampledNonItemized = _sample(nonItemized, targetNonItemized);
 
-    final pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
+    var pool = <Recipe>[...sampledItemized, ...sampledNonItemized]
       ..shuffle(rng);
+
+    // Allergen/Diet guardrails filtering (strict) prior to scoring
+    if (strict && (reqDiet.isNotEmpty || selectedAllergens.isNotEmpty)) {
+      pool = pool.where((r) {
+        final violates = AllergenClassifier.violatesDiet(r, reqDiet);
+        if (violates) {
+          if (kDebugMode) {
+            debugPrint('[AllergenGuard] recipe=${r.id} conflicts=[diet] strict=true');
+          }
+          return false;
+        }
+        if (selectedAllergens.isEmpty) return true;
+        final set = AllergenClassifier.allergensForRecipe(r, ingById);
+        final hasConflict = set.any((a) => selectedAllergens.contains(a));
+        if (hasConflict) {
+          if (kDebugMode) {
+            debugPrint('[AllergenGuard] recipe=${r.id} conflicts=${set.intersection(selectedAllergens.toSet()).toList()} strict=true');
+          }
+        }
+        return !hasConflict;
+      }).toList();
+    }
 
     // Build a base score map to sort candidates with optional biases
     final baseScores = <String, double>{};
@@ -186,6 +216,20 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
     }) {
       // Start from base score (cost/fav) with slight randomness
       double score = (baseScores[candidate.id] ?? 0) + rng.nextDouble() * 0.01;
+
+      // Apply soft penalties for non-strict diet/allergen conflicts
+      final violates = AllergenClassifier.violatesDiet(candidate, reqDiet);
+      if (violates) {
+        if (strict) return -1e9; // hard exclude
+        score -= 2.0;
+      } else if (selectedAllergens.isNotEmpty) {
+        final set = AllergenClassifier.allergensForRecipe(candidate, ingById);
+        final hasConflict = set.any((a) => selectedAllergens.contains(a));
+        if (hasConflict) {
+          if (strict) return -1e9;
+          score -= 2.0;
+        }
+      }
 
       // Repeat penalty this week (soft when approaching limit, hard when exceeding)
       final maxRepeats = varietyOptions?.maxRepeatsPerWeek ?? 1;

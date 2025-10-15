@@ -10,8 +10,6 @@ import '../../../domain/services/variety_prefs_service.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/substitution_providers.dart';
 import '../../../domain/value/substitution_score.dart';
-import '../../providers/diet_allergen_providers.dart';
-import '../../../domain/services/allergen_classifier.dart';
 
 /// Bottom drawer for showing meal swap options
 class SwapDrawer extends ConsumerStatefulWidget {
@@ -91,11 +89,6 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
         servingsForMeal: widget.servingsForMeal,
       )),
     );
-    final reqDiet = ref.watch(dietFlagsPrefProvider).asData?.value ?? const <String>[];
-    final pickedAllergens = ref.watch(allergensPrefProvider).asData?.value ?? const <String>[];
-    final strict = ref.watch(strictModePrefProvider).asData?.value ?? true;
-    final ings = ref.watch(allIngredientsProvider).asData?.value ?? const <dynamic>[];
-    final ingById = {for (final i in ings) i.id: i};
 
     // Precompute pantry utilization lazily for visible candidates
     Future<void> _ensurePantry() async {
@@ -197,32 +190,13 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
           if (_pantryFirst && s.pantryGain < 0.05) continue;
           if (_cheaperFirst && s.budgetGain < 0.05) continue;
           if (_closerMacros && s.macroGain < 0.05) continue;
-          // Allergen/diet guardrails
-          if (strict && (reqDiet.isNotEmpty || pickedAllergens.isNotEmpty)) {
-            final violates = AllergenClassifier.violatesDiet(r, reqDiet);
-            bool allergen = false;
-            if (!violates && pickedAllergens.isNotEmpty && ingById.isNotEmpty) {
-              final set = AllergenClassifier.allergensForRecipe(r, ingById);
-              allergen = set.any((a) => pickedAllergens.contains(a));
-            }
-            if (violates || allergen) continue; // hard filter in strict mode
-          }
           final wPantry = _pantryFirst ? 0.45 : 0.0;
           final wBudget = _cheaperFirst ? 0.35 : 0.0;
           final wMacro = _closerMacros ? 0.20 : 0.0;
           final any = (wPantry + wBudget + wMacro) > 0;
-          double local = any
+          final local = any
               ? (s.pantryGain * wPantry + s.budgetGain * wBudget + s.macroGain * wMacro)
               : s.composite;
-          if (!strict && (reqDiet.isNotEmpty || pickedAllergens.isNotEmpty)) {
-            final violates = AllergenClassifier.violatesDiet(r, reqDiet);
-            bool allergen = false;
-            if (!violates && pickedAllergens.isNotEmpty && ingById.isNotEmpty) {
-              final set = AllergenClassifier.allergensForRecipe(r, ingById);
-              allergen = set.any((a) => pickedAllergens.contains(a));
-            }
-            if (violates || allergen) local -= 2.0; // down-rank
-          }
           smartRows.add((recipe: r, score: s, localScore: local));
         }
         smartRows.sort((b, a) => a.localScore.compareTo(b.localScore));
@@ -239,13 +213,6 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                 final isFav = favs.contains(r.id);
                 final currencyFmt = NumberFormat.currency(symbol: '\$');
                 final pantryPct = (s.coverageDelta * 100);
-                // Conflict badges
-                final violatesDiet = AllergenClassifier.violatesDiet(r, reqDiet);
-                bool allergenConflict = false;
-                if (!violatesDiet && pickedAllergens.isNotEmpty && ingById.isNotEmpty) {
-                  final set = AllergenClassifier.allergensForRecipe(r, ingById);
-                  allergenConflict = set.any((a) => pickedAllergens.contains(a));
-                }
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: Padding(
@@ -290,28 +257,6 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                           spacing: 6,
                           runSpacing: 4,
                           children: [
-                            if (!strict && (violatesDiet || allergenConflict))
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.errorContainer,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.warning_amber_outlined, size: 12, color: Theme.of(context).colorScheme.onErrorContainer),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      violatesDiet ? 'Diet mismatch' : 'Allergen',
-                                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                            color: Theme.of(context).colorScheme.onErrorContainer,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
                             _ImpactChip(
                               label: '${pantryPct >= 0 ? '+' : ''}${pantryPct.toStringAsFixed(0)}% pantry',
                               isPositive: s.pantryGain > 0,
@@ -724,6 +669,7 @@ enum SwapReasonType {
 }
 
 void _noRecipe(Recipe _) {}
+
 
 
 

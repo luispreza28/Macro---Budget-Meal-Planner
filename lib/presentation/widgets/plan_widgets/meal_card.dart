@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../../domain/entities/ingredient.dart'; // Unit & Ingredient here\r\n\r\nconst bool kShowPantryBadges = false; // gate pantry badges
+import '../../providers/diet_allergen_providers.dart';
 
 /// Card displaying a meal in the plan grid
-class MealCard extends StatelessWidget {
+class MealCard extends ConsumerWidget {
   const MealCard({
     super.key,
     required this.recipe,
@@ -30,10 +32,39 @@ class MealCard extends StatelessWidget {
   final Map<String, Ingredient> ingredients;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final totalKcal = recipe.macrosPerServ.kcal * servings;
     final totalProtein = recipe.macrosPerServ.proteinG * servings;
     final totalCost = recipe.costPerServCents * servings / 100;
+    // Diet/allergen conflict detection (best-effort)
+    final reqDiet = ref.watch(dietFlagsPrefProvider).asData?.value ?? const <String>[];
+    final pickedAllergens = ref.watch(allergensPrefProvider).asData?.value ?? const <String>[];
+    final strict = ref.watch(strictModePrefProvider).asData?.value ?? true;
+    bool dietMismatch = reqDiet.isNotEmpty && !recipe.isCompatibleWithDiet(reqDiet);
+    bool allergenConflict = false;
+    if (!dietMismatch && pickedAllergens.isNotEmpty && ingredients.isNotEmpty) {
+      // Lightweight inline heuristic: check ingredient names/tags
+      final set = <String>{};
+      for (final it in recipe.items) {
+        final ing = ingredients[it.ingredientId];
+        if (ing == null) continue;
+        final lt = ing.tags.map((t) => t.toLowerCase());
+        for (final t in lt) {
+          if (t.startsWith('allergen:')) set.add(t.substring('allergen:'.length));
+        }
+        final name = ing.name.toLowerCase();
+        if (name.contains('peanut')) set.add('peanut');
+        if (name.contains('almond') || name.contains('walnut') || name.contains('cashew') || name.contains('pistachio') || name.contains('hazelnut')) set.add('tree_nut');
+        if (name.contains('milk') || name.contains('cheese') || name.contains('butter') || name.contains('yogurt')) set.add('milk');
+        if (name.contains('egg')) set.add('egg');
+        if (name.contains('soy')) set.add('soy');
+        if (name.contains('wheat')) set.add('wheat');
+        if (name.contains('sesame')) set.add('sesame');
+        if (name.contains('shrimp') || name.contains('crab') || name.contains('lobster')) set.add('shellfish');
+        if (name.contains('fish')) set.add('fish');
+      }
+      allergenConflict = set.any((a) => pickedAllergens.contains(a));
+    }
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -49,7 +80,18 @@ class MealCard extends StatelessWidget {
                   ),
                 )
               : null,
-          child: Padding(
+          child: Stack(
+            children: [
+              if (dietMismatch || allergenConflict)
+                Positioned(
+                  top: 4,
+                  left: 4,
+                  child: Tooltip(
+                    message: 'Allergen/Diet conflict (tap to swap)',
+                    child: Icon(Icons.warning_amber_outlined, size: 16, color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+              Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -188,6 +230,8 @@ class MealCard extends StatelessWidget {
                 ),
               ],
             ),
+              ),
+            ],
           ),
         ),
       ),

@@ -14,6 +14,9 @@ import '../../../domain/entities/ingredient.dart';
 import '../../../domain/services/variety_prefs_service.dart';
 import '../../../domain/services/reminder_prefs_service.dart';
 import '../../../domain/services/reminder_scheduler.dart';
+import '../../providers/diet_allergen_providers.dart';
+import '../../../domain/services/diet_allergen_prefs_service.dart';
+import '../../widgets/tag_selector.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -281,6 +284,134 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ],
               ),
             ),
+
+          // Diet & Allergens
+          _buildSectionHeader('Diet & Allergens'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Consumer(
+                builder: (context, ref, _) {
+                  final dietAsync = ref.watch(dietFlagsPrefProvider);
+                  final allergensAsync = ref.watch(allergensPrefProvider);
+                  final strictAsync = ref.watch(strictModePrefProvider);
+
+                  final diet = dietAsync.asData?.value ?? const <String>[];
+                  final allergens = allergensAsync.asData?.value ?? const <String>[];
+                  final strict = strictAsync.asData?.value ?? true;
+
+                  // Common diet flags aligned with onboarding
+                  const dietOptions = <String, String>{
+                    'vegetarian': 'Vegetarian',
+                    'vegan': 'Vegan',
+                    'gluten_free': 'Gluten Free',
+                    'dairy_free': 'Dairy Free',
+                    'keto': 'Keto',
+                    'paleo': 'Paleo',
+                    'low_sodium': 'Low Sodium',
+                    'nut_free': 'Nut Free',
+                  };
+
+                  // Standard allergen keys
+                  const stdAllergens = <String, String>{
+                    'peanut': 'Peanut',
+                    'tree_nut': 'Tree Nuts',
+                    'milk': 'Milk',
+                    'egg': 'Egg',
+                    'fish': 'Fish',
+                    'shellfish': 'Shellfish',
+                    'soy': 'Soy',
+                    'wheat': 'Wheat',
+                    'sesame': 'Sesame',
+                  };
+
+                  final svc = ref.read(dietAllergenPrefsServiceProvider);
+
+                  Future<void> _saveDiet(Set<String> flags) async {
+                    await svc.setDietFlags(flags.toList());
+                    ref.invalidate(dietFlagsPrefProvider);
+                    // Downstream updates
+                    ref.invalidate(allRecipesProvider);
+                    ref.invalidate(shoppingListItemsProvider);
+                  }
+
+                  Future<void> _saveAllergens(Set<String> ids) async {
+                    await svc.setAllergens(ids.toList());
+                    ref.invalidate(allergensPrefProvider);
+                    // Downstream updates
+                    ref.invalidate(shoppingListItemsProvider);
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Diet flags
+                      TagSelector(
+                        title: 'Diet flags',
+                        options: dietOptions,
+                        selectedOptions: diet.toSet(),
+                        onChanged: (v) => _saveDiet(v),
+                      ),
+                      const SizedBox(height: 16),
+                      // Allergens chips + free-text
+                      Text('Allergens', style: Theme.of(context).textTheme.titleSmall),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: stdAllergens.entries.map((e) {
+                          final selected = allergens.contains(e.key);
+                          return FilterChip(
+                            label: Text(e.value),
+                            selected: selected,
+                            onSelected: (sel) {
+                              final next = allergens.toSet();
+                              if (sel) next.add(e.key); else next.remove(e.key);
+                              _saveAllergens(next);
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 8),
+                      _OtherAllergensField(
+                        initial: allergens.where((a) => !stdAllergens.keys.contains(a)).join(', '),
+                        onSubmitted: (other) {
+                          final tokens = other
+                              .split(',')
+                              .map((s) => s.trim().toLowerCase())
+                              .where((s) => s.isNotEmpty)
+                              .toSet();
+                          final union = {...allergens.where((a) => stdAllergens.keys.contains(a)), ...tokens};
+                          _saveAllergens(union);
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      SwitchListTile.adaptive(
+                        title: const Text('Strict mode'),
+                        subtitle: const Text('Exclude conflicts in generation & swaps'),
+                        value: strict,
+                        onChanged: (v) async {
+                          await svc.setStrictMode(v);
+                          ref.invalidate(strictModePrefProvider);
+                        },
+                      ),
+                      if (strict)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 16, bottom: 8),
+                          child: Text(
+                            'Will be excluded in plan generation & swaps.',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
 
           // DEV utilities
           _buildSectionHeader('DEV'),
@@ -1148,6 +1279,52 @@ class _ErrorSection extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _OtherAllergensField extends StatefulWidget {
+  const _OtherAllergensField({required this.initial, required this.onSubmitted});
+  final String initial;
+  final ValueChanged<String> onSubmitted;
+
+  @override
+  State<_OtherAllergensField> createState() => _OtherAllergensFieldState();
+}
+
+class _OtherAllergensFieldState extends State<_OtherAllergensField> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void didUpdateWidget(covariant _OtherAllergensField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initial != widget.initial && _controller.text != widget.initial) {
+      _controller.text = widget.initial;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _controller,
+      decoration: const InputDecoration(
+        labelText: 'Other…',
+        hintText: 'comma-separated (e.g., cilantro, mushrooms)',
+        prefixIcon: Icon(Icons.warning_amber_outlined),
+      ),
+      onSubmitted: widget.onSubmitted,
     );
   }
 }

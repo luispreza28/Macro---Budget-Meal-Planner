@@ -16,6 +16,7 @@ import '../../../domain/services/store_profile_service.dart';
 import '../../../domain/services/trip_cost_service.dart';
 import 'package:intl/intl.dart';
 import '../../providers/store_compare_providers.dart';
+import '../../providers/diet_allergen_providers.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -270,11 +271,29 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                     final title = _aisleDisplayName(group.aisle);
                     final items = group.items;
 
+                    final pickedAllergens = ref.watch(allergensPrefProvider).asData?.value ?? const <String>[];
+                    bool _isFlagged(AggregatedShoppingItem it) {
+                      if (pickedAllergens.isEmpty) return false;
+                      final lowerName = it.ingredient.name.toLowerCase();
+                      for (final a in pickedAllergens) {
+                        final k = a.toLowerCase();
+                        if (lowerName.contains(k)) return true;
+                      }
+                      for (final t in it.ingredient.tags) {
+                        final tl = t.toLowerCase();
+                        if (tl.startsWith('allergen:')) {
+                          final key = tl.substring('allergen:'.length);
+                          if (pickedAllergens.contains(key)) return true;
+                        }
+                      }
+                      return false;
+                    }
                     return _AisleSection(
                       title: title,
                       items: items,
                       isChecked: _isCheckedItem,
                       toggleChecked: _toggleCheckedItem,
+                      isFlagged: _isFlagged,
                     );
                   },
                 ),
@@ -414,12 +433,14 @@ class _AisleSection extends StatelessWidget {
     required this.items,
     required this.isChecked,
     required this.toggleChecked,
+    required this.isFlagged,
   });
 
   final String title;
   final List<AggregatedShoppingItem> items;
   final bool Function(AggregatedShoppingItem item) isChecked;
   final void Function(AggregatedShoppingItem item) toggleChecked;
+  final bool Function(AggregatedShoppingItem item) isFlagged;
 
   @override
   Widget build(BuildContext context) {
@@ -466,8 +487,10 @@ class _AisleSection extends StatelessWidget {
               final qtyStr = _formatQty(it.totalQty, it.unit);
               final checked = isChecked(it);
 
+              final flagged = isFlagged(it);
               return ListTile(
                 dense: true,
+                tileColor: flagged ? Theme.of(context).colorScheme.errorContainer.withOpacity(0.12) : null,
                 leading: Checkbox.adaptive(
                   value: checked,
                   onChanged: (_) => toggleChecked(it),
@@ -504,6 +527,17 @@ class _AisleSection extends StatelessWidget {
                         '\$${(it.estimatedCostCents / 100).toStringAsFixed(2)}',
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    if (flagged)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          'Allergen',
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: Theme.of(context).colorScheme.error,
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
                       ),
                   ],
