@@ -12,6 +12,9 @@ import '../../providers/recipe_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../../domain/entities/ingredient.dart';
 import '../../../domain/services/variety_prefs_service.dart';
+import '../../providers/nutrition_lookup_providers.dart';
+import '../../../domain/services/nutrition_lookup_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -37,10 +40,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _enablePrepMix = true;
   int _historyLookbackPlans = 2; // 0..4
 
+  // Nutrition APIs local state
+  final TextEditingController _fdcKeyCtrl = TextEditingController();
+  String _offRegion = 'world';
+  bool _loadingNutritionPrefs = true;
+
   @override
   void initState() {
     super.initState();
     _loadVarietyPrefs();
+    _loadNutritionPrefs();
   }
 
   Future<void> _loadVarietyPrefs() async {
@@ -59,6 +68,28 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       _historyLookbackPlans = hist;
       _loadingVariety = false;
     });
+  }
+
+  Future<void> _loadNutritionPrefs() async {
+    final sp = await SharedPreferences.getInstance();
+    final key = sp.getString('settings.api.fdc.key') ?? '';
+    final region = sp.getString('settings.api.off.region') ?? 'world';
+    final lastSrc = sp.getString('nutrition.last_source');
+    setState(() {
+      _fdcKeyCtrl.text = key;
+      _offRegion = region;
+      _loadingNutritionPrefs = false;
+    });
+    if (lastSrc != null && (lastSrc == 'fdc' || lastSrc == 'off')) {
+      ref.read(nutritionSearchSourceProvider.notifier).state = lastSrc;
+    }
+    // Preload recent queries list
+    final raw = sp.getString('nutrition.recent_queries.v1');
+    if (raw != null && raw.startsWith('[')) {
+      final body = raw.substring(1, raw.length - 1);
+      final xs = body.isEmpty ? <String>[] : body.split(',').map((e) => e.replaceAll('"', '').trim()).where((e) => e.isNotEmpty).toList();
+      ref.read(recentNutritionQueriesProvider.notifier).state = xs.take(10).toList();
+    }
   }
 
   @override
@@ -96,6 +127,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             error: (error, stack) => _ErrorSection(error: error.toString() ),
             data: (targets) => _UserProfileSection(targets: targets),
           ),
+
+          const SizedBox(height: 16),
+
+          // Nutrition APIs section
+          _buildSectionHeader('Nutrition APIs'),
+          _NutritionApisCard(),
 
           const SizedBox(height: 16),
 
@@ -927,6 +964,150 @@ class _ErrorSection extends StatelessWidget {
             const Icon(Icons.error, size: 48, color: Colors.red),
             const SizedBox(height: 16),
             Text('Error loading profile: $error'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NutritionApisCard extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_NutritionApisCard> createState() => _NutritionApisCardState();
+}
+
+class _NutritionApisCardState extends ConsumerState<_NutritionApisCard> {
+  final TextEditingController _fdcKeyCtrl = TextEditingController();
+  bool _loaded = false;
+  String _offRegion = 'world';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final sp = await SharedPreferences.getInstance();
+    _fdcKeyCtrl.text = sp.getString('settings.api.fdc.key') ?? '';
+    _offRegion = sp.getString('settings.api.off.region') ?? 'world';
+    setState(() => _loaded = true);
+  }
+
+  @override
+  void dispose() {
+    _fdcKeyCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final src = ref.watch(nutritionSearchSourceProvider);
+    final recent = ref.watch(recentNutritionQueriesProvider);
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.restaurant, size: 22),
+                const SizedBox(width: 8),
+                Text('Nutrition APIs', style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _fdcKeyCtrl,
+              decoration: const InputDecoration(
+                labelText: 'FDC API Key',
+                helperText: 'Required for USDA FDC lookups',
+                prefixIcon: Icon(Icons.vpn_key),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: () async {
+                  await ref.read(nutritionLookupServiceProvider).saveFdcKey(_fdcKeyCtrl.text.trim());
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('FDC key saved')));
+                  }
+                },
+                icon: const Icon(Icons.save),
+                label: const Text('Save Key'),
+              ),
+            ),
+            const Divider(height: 24),
+            Text('Default Source', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'fdc', label: Text('FDC')),
+                ButtonSegment(value: 'off', label: Text('OFF')),
+              ],
+              selected: {src},
+              onSelectionChanged: (s) async {
+                final v = s.first;
+                ref.read(nutritionSearchSourceProvider.notifier).state = v;
+                final sp = await SharedPreferences.getInstance();
+                await sp.setString('nutrition.last_source', v);
+              },
+            ),
+            const SizedBox(height: 16),
+            Text('OpenFoodFacts Region', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              value: _loaded ? _offRegion : 'world',
+              items: const [
+                DropdownMenuItem(value: 'world', child: Text('Global (world)')),
+                DropdownMenuItem(value: 'us', child: Text('United States (us)')),
+                DropdownMenuItem(value: 'uk', child: Text('United Kingdom (uk)')),
+                DropdownMenuItem(value: 'de', child: Text('Germany (de)')),
+                DropdownMenuItem(value: 'fr', child: Text('France (fr)')),
+              ],
+              onChanged: (v) async {
+                if (v == null) return;
+                setState(() => _offRegion = v);
+                final sp = await SharedPreferences.getInstance();
+                await sp.setString('settings.api.off.region', v);
+              },
+            ),
+            const Divider(height: 24),
+            Row(
+              children: [
+                Text('Recent lookups', style: Theme.of(context).textTheme.titleSmall),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: recent.isEmpty
+                      ? null
+                      : () async {
+                          ref.read(recentNutritionQueriesProvider.notifier).state = const [];
+                          final sp = await SharedPreferences.getInstance();
+                          await sp.remove('nutrition.recent_queries.v1');
+                        },
+                  icon: const Icon(Icons.clear),
+                  label: const Text('Clear'),
+                ),
+              ],
+            ),
+            if (recent.isEmpty)
+              Text('No lookups yet', style: Theme.of(context).textTheme.bodySmall)
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final q in recent)
+                    InputChip(
+                      label: Text(q),
+                      onPressed: null,
+                    ),
+                ],
+              ),
           ],
         ),
       ),

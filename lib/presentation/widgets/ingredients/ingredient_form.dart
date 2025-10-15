@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../domain/services/density_service.dart';
+import '../../widgets/ingredient/nutrition_lookup_sheet.dart';
 
 import '../../../domain/entities/ingredient.dart';
 
@@ -103,6 +104,31 @@ class _IngredientFormState extends State<IngredientForm> {
               ),
               const SizedBox(height: 12),
               _ReadOnlyMacrosTile(title: 'Current per 100', m: ing.macrosPer100g),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  icon: const Icon(Icons.search),
+                  label: const Text('Lookup nutrition'),
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      builder: (ctx) => DraggableScrollableSheet(
+                        initialChildSize: 0.75,
+                        minChildSize: 0.5,
+                        maxChildSize: 0.95,
+                        expand: false,
+                        builder: (_, controller) => Padding(
+                          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                          child: NutritionLookupSheet(ingredient: ing),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
               const SizedBox(height: 12),
       _numberField(
         _densityGPerMl,
