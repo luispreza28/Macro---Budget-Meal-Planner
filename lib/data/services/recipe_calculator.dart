@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../domain/entities/ingredient.dart';
+import '../../domain/services/density_service.dart';
 import '../../domain/entities/recipe.dart';
 
 class RecipeDerivedTotals {
@@ -132,17 +133,17 @@ class RecipeCalculator {
   }) {
     if (from == to) return qty;
 
-    // grams <-> ml: don’t convert without density; return as-is (log it)
+    // grams <-> ml: try resolver; fall back to as-is when missing
     if ((from == Unit.grams && to == Unit.milliliters) ||
         (from == Unit.milliliters && to == Unit.grams)) {
-      final d = ingredient.densityGPerMl;
+      final res = DensityCache.tryResolve(ingredient);
+      final d = res?.gPerMl;
       if (d != null && d > 0) {
-        final toQty = (from == Unit.grams && to == Unit.milliliters)
-            ? (qty / d)
-            : (qty * d);
+        final toQty = (from == Unit.grams && to == Unit.milliliters) ? (qty / d) : (qty * d);
         if (kDebugMode) {
-          debugPrint('[RecipeCalc]    CONVERT g↔ml using density=${d.toStringAsFixed(3)} : '
+          debugPrint('[RecipeCalc]    CONVERT g↔ml src=${res!.source.name} g/ml=${d.toStringAsFixed(3)} : '
               '${qty.toStringAsFixed(2)}${from.name} -> ${toQty.toStringAsFixed(2)}${to.name}');
+          debugPrint('[RecipeCalc] DENSITY source=${res.source.name} g/ml=${d.toStringAsFixed(3)}');
         }
         return toQty;
       } else {

@@ -8,6 +8,7 @@ import '../../../domain/entities/ingredient.dart' as domain;
 import '../../../domain/entities/recipe.dart';
 import '../../../data/services/recipe_calculator.dart';
 import '../../../domain/services/recipe_math.dart';
+import '../../../domain/services/density_service.dart';
 import '../../providers/ingredient_providers.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/shortfall_providers.dart';
@@ -214,7 +215,7 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
                                         _ConversionHint(
                                           itemUnit: item.unit,
                                           baseUnit: ingredient.unit,
-                                          density: ingredient.densityGPerMl,
+                                          ingredient: ingredient,
                                         ),
                                     ],
                                   ),
@@ -892,11 +893,11 @@ class _ConversionHint extends StatelessWidget {
   const _ConversionHint({
     required this.itemUnit,
     required this.baseUnit,
-    required this.density,
+    required this.ingredient,
   });
   final domain.Unit itemUnit;
   final domain.Unit baseUnit;
-  final double? density;
+  final domain.Ingredient ingredient;
 
   @override
   Widget build(BuildContext context) {
@@ -906,7 +907,8 @@ class _ConversionHint extends StatelessWidget {
     if (!involvesMassVol) return const SizedBox.shrink();
     final textTheme = Theme.of(context).textTheme;
     final onVar = Theme.of(context).colorScheme.onSurfaceVariant;
-    if (density != null && density! > 0) {
+    final density = ingredient.densityGPerMl;
+    if (density != null && density > 0) {
       return Padding(
         padding: const EdgeInsets.only(top: 2),
         child: Text(
@@ -915,10 +917,14 @@ class _ConversionHint extends StatelessWidget {
         ),
       );
     } else {
+      // Best-effort suggestion from resolver cache for actual ingredient
+      final res = DensityCache.tryResolve(ingredient);
       return Padding(
         padding: const EdgeInsets.only(top: 2),
         child: Text(
-          'No density set; cannot convert g↔ml',
+          res == null
+              ? 'No density set; cannot convert g↔ml'
+              : 'No density set; suggested ${res.gPerMl.toStringAsFixed(2)} g/ml',
           style: textTheme.labelSmall?.copyWith(color: onVar),
         ),
       );

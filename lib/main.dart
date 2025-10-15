@@ -8,6 +8,7 @@ import 'core/utils/logger.dart';
 import 'core/utils/app_lifecycle_manager.dart';
 import 'core/utils/performance_monitor.dart';
 import 'presentation/router/app_router.dart';
+import 'domain/services/density_service.dart';
 import 'presentation/providers/database_providers.dart';
 
 void main() async {
@@ -44,6 +45,11 @@ void main() async {
         child: const MacroBudgetMealPlannerApp(),
       ),
     );
+
+    // Seed density catalog and warm cache after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      container.read(densityServiceProvider).ensureSeeded();
+    });
 
     AppLogger.i('Application launched successfully');
   } catch (e, stackTrace) {

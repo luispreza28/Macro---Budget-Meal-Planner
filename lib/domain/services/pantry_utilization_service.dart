@@ -5,6 +5,7 @@ import '../repositories/pantry_repository.dart';
 import '../../presentation/providers/database_providers.dart';
 import '../entities/ingredient.dart';
 import '../entities/recipe.dart';
+import 'density_service.dart';
 
 final pantryUtilizationServiceProvider = Provider<PantryUtilizationService>(
   (ref) => PantryUtilizationService(ref),
@@ -103,7 +104,8 @@ class PantryUtilizationService {
     if (from == Unit.piece || to == Unit.piece) return null;
 
     // grams <-> milliliters via density
-    final density = ing.densityGPerMl;
+    final res = DensityCache.tryResolve(ing);
+    final density = res?.gPerMl;
     if (density == null || density <= 0) return null;
 
     if (from == Unit.grams && to == Unit.milliliters) {

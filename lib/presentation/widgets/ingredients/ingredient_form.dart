@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../domain/services/density_service.dart';
 
 import '../../../domain/entities/ingredient.dart';
 
@@ -101,26 +104,28 @@ class _IngredientFormState extends State<IngredientForm> {
               const SizedBox(height: 12),
               _ReadOnlyMacrosTile(title: 'Current per 100', m: ing.macrosPer100g),
               const SizedBox(height: 12),
-              _numberField(
-                _densityGPerMl,
-                label: 'Density (g per ml)',
-                allowEmpty: true,
-                helperText: 'Used to convert grams↔milliliters for this ingredient only.',
-                validator: (t) {
-                  final v = t?.trim() ?? '';
-                  if (v.isEmpty) return null; // optional
-                  final d = double.tryParse(v);
-                  if (d == null) return 'Enter a number';
-                  if (d <= 0) return 'Must be > 0';
-                  if (d > _maxDensity) return 'Unreasonably high (> $_maxDensity)';
-                  return null;
-                },
-              ),
-              if (ing.unit == Unit.grams || ing.unit == Unit.milliliters)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4.0),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      _numberField(
+        _densityGPerMl,
+        label: 'Density (g per ml)',
+        allowEmpty: true,
+        helperText: 'Used to convert grams↔milliliters for this ingredient only.',
+        validator: (t) {
+          final v = t?.trim() ?? '';
+          if (v.isEmpty) return null; // optional
+          final d = double.tryParse(v);
+          if (d == null) return 'Enter a number';
+          if (d <= 0) return 'Must be > 0';
+          if (d > _maxDensity) return 'Unreasonably high (> $_maxDensity)';
+          return null;
+        },
+      ),
+      // Suggested density (resolver) UI
+      _DensitySuggestionRow(ingredient: ing),
+      if (ing.unit == Unit.grams || ing.unit == Unit.milliliters)
+        Padding(
+          padding: const EdgeInsets.only(top: 4.0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.tertiary),
                       const SizedBox(width: 6),
@@ -306,6 +311,80 @@ class _ReadOnlyMacrosTile extends StatelessWidget {
           Text('Fat: ${m.fatG.toStringAsFixed(1)} g', style: TextStyle(color: onVar)),
         ],
       ),
+    );
+  }
+}
+
+class _DensitySuggestionRow extends ConsumerWidget {
+  const _DensitySuggestionRow({required this.ingredient});
+  final Ingredient ingredient;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FutureBuilder(
+      future: ref.read(densityServiceProvider).resolveFor(ingredient),
+      builder: (context, snap) {
+        final res = snap.data as DensityResolution?;
+        final hasExplicit = ingredient.densityGPerMl != null && ingredient.densityGPerMl! > 0;
+        if (res == null) {
+          return const SizedBox.shrink();
+        }
+        final sourceLabel = switch (res.source) {
+          DensitySource.explicit => 'Explicit',
+          DensitySource.user_override => 'Override',
+          DensitySource.catalog_seed => 'Catalog',
+          DensitySource.inferred => 'Inferred',
+        };
+        final valueStr = res.gPerMl.toStringAsFixed(2);
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text('$sourceLabel • $valueStr g/ml', style: Theme.of(context).textTheme.labelSmall),
+              ),
+              const SizedBox(width: 8),
+              if (!hasExplicit && res.source != DensitySource.explicit)
+                TextButton(
+                  onPressed: () async {
+                    await ref.read(densityServiceProvider).setOverride(ingredient.id, res.gPerMl);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Applied ${valueStr} g/ml as override')),);
+                    }
+                  },
+                  child: const Text('Use suggested'),
+                ),
+              const SizedBox(width: 4),
+              FutureBuilder(
+                future: ref.read(densityServiceProvider).overrides(),
+                builder: (context, ovSnap) {
+                  final ov = (ovSnap.data as Map<String, double>?) ?? const {};
+                  final hasOverride = ov.containsKey(ingredient.id);
+                  if (!hasOverride) return const SizedBox.shrink();
+                  return TextButton(
+                    onPressed: () async {
+                      await ref.read(densityServiceProvider).clearOverride(ingredient.id);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Override cleared')),
+                        );
+                      }
+                    },
+                    child: const Text('Clear override'),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

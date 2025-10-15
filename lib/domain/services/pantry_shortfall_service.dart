@@ -7,6 +7,7 @@ import '../entities/recipe.dart';
 import '../repositories/ingredient_repository.dart';
 import '../repositories/pantry_repository.dart';
 import '../value/shortfall_item.dart';
+import 'density_service.dart';
 import '../../presentation/providers/database_providers.dart';
 
 final pantryShortfallServiceProvider =
@@ -143,25 +144,26 @@ class PantryShortfallService {
             reason = 'piece↔mass/volume mismatch';
             // keep required qty; do not subtract
           } else if (canBeMassVolumePair) {
-            final density = ingredient.densityGPerMl;
-            if (density == null || density <= 0) {
+            final res = await ref.read(densityServiceProvider).resolveFor(ingredient);
+            if (res == null || res.gPerMl <= 0) {
               reason = 'unit mismatch (needs density)';
-              // keep required qty; do not subtract
+              if (kDebugMode) {
+                debugPrint('[Density] shortfall: ${ingredient.id} no density; keep qty=${reqQty.toStringAsFixed(2)}');
+              }
             } else {
-              // Convert all on-hand grams/ml to required unit using density and subtract
               double availableInReqUnit = 0.0;
               onHandUnits.forEach((u, qty) {
                 if (u == Unit.grams && reqUnit == Unit.milliliters) {
-                  final converted = _gramsToMl(qty, density);
+                  final converted = qty / res.gPerMl;
                   if (kDebugMode) {
-                    debugPrint('[Shortfall] CONVERT g↔ml using density=${density.toStringAsFixed(3)} : '
+                    debugPrint('[Shortfall] CONVERT g↔ml src=${res.source.name} g/ml=${res.gPerMl.toStringAsFixed(3)} : '
                         'onHand ${qty.toStringAsFixed(2)} ${u.name} -> ${converted.toStringAsFixed(2)} ${reqUnit.name}');
                   }
                   availableInReqUnit += converted;
                 } else if (u == Unit.milliliters && reqUnit == Unit.grams) {
-                  final converted = _mlToGrams(qty, density);
+                  final converted = qty * res.gPerMl;
                   if (kDebugMode) {
-                    debugPrint('[Shortfall] CONVERT g↔ml using density=${density.toStringAsFixed(3)} : '
+                    debugPrint('[Shortfall] CONVERT g↔ml src=${res.source.name} g/ml=${res.gPerMl.toStringAsFixed(3)} : '
                         'onHand ${qty.toStringAsFixed(2)} ${u.name} -> ${converted.toStringAsFixed(2)} ${reqUnit.name}');
                   }
                   availableInReqUnit += converted;
@@ -197,7 +199,6 @@ class PantryShortfallService {
 
     return out;
   }
-
   double _mlToGrams(double qty, double densityGPerMl) => qty * densityGPerMl;
   double _gramsToMl(double qty, double densityGPerMl) => qty / densityGPerMl;
 }

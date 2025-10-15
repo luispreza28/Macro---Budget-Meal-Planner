@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../entities/ingredient.dart';
 import '../entities/store_profile.dart';
+import 'density_service.dart';
 
 final tripCostServiceProvider =
     Provider<TripCostService>((ref) => TripCostService(ref));
@@ -98,15 +99,21 @@ class TripCostService {
       baseQty = qty;
     } else if ((unit == Unit.grams && ing.unit == Unit.milliliters) ||
         (unit == Unit.milliliters && ing.unit == Unit.grams)) {
-      final d = ing.densityGPerMl;
-      if (d == null || d <= 0) {
+      final res = DensityCache.tryResolve(ing);
+      if (res == null || res.gPerMl <= 0) {
         if (kDebugMode) {
-          debugPrint(
-              '[TripCost][WARN] density missing for ${ing.id}; using raw qty without conversion');
+          debugPrint('[TripCost][WARN] density missing for ${ing.id}; using raw qty without conversion');
         }
         baseQty = qty; // documented behavior
       } else {
-        baseQty = (unit == Unit.grams) ? qty / d : qty * d;
+        if (unit == Unit.grams) {
+          baseQty = qty / res.gPerMl;
+        } else {
+          baseQty = qty * res.gPerMl;
+        }
+        if (kDebugMode) {
+          debugPrint('[RecipeCalc] DENSITY source=${res.source.name} g/ml=${res.gPerMl.toStringAsFixed(3)}');
+        }
       }
     } else {
       // piece<->mass/volume are not auto-converted; only price per piece when base is piece
