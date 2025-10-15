@@ -21,6 +21,9 @@ import '../../providers/pantry_providers.dart';
 import '../../../domain/services/substitutions_service.dart';
 import '../../../domain/services/substitution_math.dart';
 import '../../../domain/services/substitution_cost_service.dart';
+import '../../../domain/entities/store_profile.dart';
+import '../../../domain/services/split_shopping_prefs.dart';
+import '../../providers/split_shopping_providers.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -255,12 +258,17 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                   ],
                 ),
               ),
+              // Split mode toggle and totals
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: _SplitHeaderAndTotals(checkedKeys: _checked),
+              ),
               // Cheapest store banner
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
                 child: _CheapestStoreBanner(),
               ),
-              // Trip total
+              // Trip total (kept for baseline when single mode)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                 child: _TripTotalBar(groups: sortedGroups, checked: _checked, store: storeAsync.value),
@@ -280,6 +288,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                       items: items,
                       isChecked: _isCheckedItem,
                       toggleChecked: _toggleCheckedItem,
+                      planId: ref.read(currentPlanProvider).asData?.value?.id,
                     );
                   },
                 ),
@@ -419,12 +428,14 @@ class _AisleSection extends StatelessWidget {
     required this.items,
     required this.isChecked,
     required this.toggleChecked,
+    required this.planId,
   });
 
   final String title;
   final List<AggregatedShoppingItem> items;
   final bool Function(AggregatedShoppingItem item) isChecked;
   final void Function(AggregatedShoppingItem item) toggleChecked;
+  final String? planId;
 
   @override
   Widget build(BuildContext context) {
@@ -471,6 +482,7 @@ class _AisleSection extends StatelessWidget {
               final qtyStr = _formatQty(it.totalQty, it.unit);
               final checked = isChecked(it);
 
+              final lineId = '${it.ingredient.id}|${it.unit.name}';
               return ListTile(
                 dense: true,
                 leading: Checkbox.adaptive(
@@ -504,6 +516,7 @@ class _AisleSection extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (planId != null) _SplitStoreBadge(planId: planId!, lineId: lineId),
                     PopupMenuButton<String>(
                       tooltip: 'More',
                       onSelected: (v) async {
@@ -860,6 +873,189 @@ class _CheapestStoreBanner extends ConsumerWidget {
   }
 }
 
+class _SplitHeaderAndTotals extends ConsumerWidget {
+  const _SplitHeaderAndTotals({required this.checkedKeys});
+  final Set<String> checkedKeys;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plan = ref.watch(currentPlanProvider).asData?.value;
+    if (plan == null) return const SizedBox.shrink();
+
+    final modeAsync = ref.watch(splitModeProvider(plan.id));
+    final resultAsync = ref.watch(splitResultProvider(plan.id));
+    final fmt = NumberFormat.currency(symbol: '\$');
+
+    return Row(
+      children: [
+        modeAsync.when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (mode) {
+            final isSplit = mode == 'split';
+            return Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('Single store'),
+                  selected: !isSplit,
+                  onSelected: (v) async {
+                    if (v) {
+                      await ref.read(splitPrefsServiceProvider).setMode(plan.id, 'single');
+                      ref.invalidate(splitModeProvider(plan.id));
+                      ref.invalidate(splitResultProvider(plan.id));
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('Split (up to 2)'),
+                  selected: isSplit,
+                  onSelected: (v) async {
+                    if (v) {
+                      await ref.read(splitPrefsServiceProvider).setMode(plan.id, 'split');
+                      ref.invalidate(splitModeProvider(plan.id));
+                      ref.invalidate(splitResultProvider(plan.id));
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        ),
+        const Spacer(),
+        resultAsync.when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (r) {
+            final combined = fmt.format(r.combinedTotalCents / 100);
+            final savings = r.baselineSingleStoreCents - r.combinedTotalCents;
+            final showSavings = savings > 0;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('Combined: $combined', style: Theme.of(context).textTheme.labelLarge),
+                if (showSavings)
+                  Text(
+                    'Save ${fmt.format(savings / 100)} vs single',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.tertiary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _SplitStoreBadge extends ConsumerWidget {
+  const _SplitStoreBadge({required this.planId, required this.lineId});
+  final String planId;
+  final String lineId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resultAsync = ref.watch(splitResultProvider(planId));
+    final storesAsync = ref.watch(storeProfilesProvider);
+    return resultAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (r) {
+        final storeId = r.assignments[lineId];
+        if (storeId == null) return const SizedBox.shrink();
+        return storesAsync.when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (stores) {
+            final sp = stores.firstWhere(
+              (s) => s.id == storeId,
+              orElse: () => stores.isNotEmpty ? stores.first : StoreProfile(id: 'x', name: 'Store', aisleOrder: const []),
+            );
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${sp.emoji ?? '🏬'} ${sp.name}',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSecondaryContainer,
+                        ),
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Store options',
+                  onSelected: (v) async {
+                    if (v == 'lock') {
+                      await _showLockSheet(context, ref, planId, lineId);
+                    } else if (v == 'clear') {
+                      await ref.read(splitPrefsServiceProvider).setLock(planId, lineId, null);
+                      ref.invalidate(splitLocksProvider(planId));
+                      ref.invalidate(splitResultProvider(planId));
+                    }
+                  },
+                  itemBuilder: (ctx) => const [
+                    PopupMenuItem<String>(value: 'lock', child: Text('Lock to store…')),
+                    PopupMenuItem<String>(value: 'clear', child: Text('Clear lock')),
+                  ],
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showLockSheet(BuildContext context, WidgetRef ref, String planId, String lineId) async {
+    await showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Consumer(builder: (context, ref, _) {
+              final storesAsync = ref.watch(storeProfilesProvider);
+              return storesAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (stores) {
+                  return ListView(
+                    shrinkWrap: true,
+                    children: [
+                      const ListTile(title: Text('Lock this item to:')),
+                      ...stores.map((s) => ListTile(
+                            leading: const Icon(Icons.store_mall_directory_outlined),
+                            title: Text('${s.emoji ?? '🏬'} ${s.name}'),
+                            onTap: () async {
+                              await ref.read(splitPrefsServiceProvider).setLock(planId, lineId, s.id);
+                              ref.invalidate(splitLocksProvider(planId));
+                              ref.invalidate(splitResultProvider(planId));
+                              if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                            },
+                          )),
+                      const SizedBox(height: 8),
+                    ],
+                  );
+                },
+              );
+            }),
+          ),
+        );
+      },
+    );
+  }
+}
+
 void _showCompareStoresModal(BuildContext context, WidgetRef ref) {
   showModalBottomSheet(
     context: context,
@@ -995,3 +1191,4 @@ String _aisleDisplayName(ing.Aisle aisle) {
       return 'Household';
   }
 }
+

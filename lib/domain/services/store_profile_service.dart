@@ -121,6 +121,15 @@ class StoreProfileService {
     _invalidateAll();
   }
 
+  /// Returns override cents per base unit for ingredients at a given store.
+  Future<Map<String, int>> priceOverrides(String storeId) async {
+    final all = await getProfiles();
+    final idx = all.indexWhere((p) => p.id == storeId);
+    if (idx == -1) return const {};
+    return Map<String, int>.from(
+        all[idx].priceOverrideCentsByIngredientId ?? const {});
+  }
+
   Future<void> clearPriceOverride({
     required String storeId,
     required String ingredientId,
