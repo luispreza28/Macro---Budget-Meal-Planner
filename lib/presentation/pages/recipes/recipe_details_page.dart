@@ -17,6 +17,10 @@ import '../../../domain/value/shortfall_item.dart';
 import '../../providers/shopping_list_providers.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_prefs_service.dart';
+import '../../../domain/services/substitutions_service.dart';
+import '../../../domain/services/substitution_math.dart';
+import '../../../domain/services/substitution_cost_service.dart';
+import '../../providers/pantry_providers.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});
@@ -276,6 +280,60 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
                                     _removeItem(
                                       index: index,
                                       ingredientById: byId,
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  tooltip: 'Substitute',
+                                  icon: const Icon(Icons.swap_horiz),
+                                  onPressed: () async {
+                                    final sourceIng = ingredient;
+                                    if (sourceIng == null) return;
+                                    await showModalBottomSheet(
+                                      context: context,
+                                      isScrollControlled: true,
+                                      showDragHandle: true,
+                                      builder: (_) => _SubstituteSheet(
+                                        sourceItem: item,
+                                        sourceIng: sourceIng,
+                                        ingredientById: byId,
+                                        onApply: (candIng, candQty, candUnit, approx, deltaPerServCents) async {
+                                          // Replace item in draft
+                                          _replaceItem(
+                                            index: index,
+                                            updated: item.copyWith(
+                                              ingredientId: candIng.id,
+                                              qty: candQty,
+                                              unit: candUnit,
+                                            ),
+                                            ingredientById: byId,
+                                          );
+                                          if (!mounted) return;
+                                          final note = deltaPerServCents == null
+                                              ? ''
+                                              : (deltaPerServCents == 0
+                                                  ? ' (no cost change)'
+                                                  : (deltaPerServCents < 0
+                                                      ? ' (−\$${(-deltaPerServCents / 100).toStringAsFixed(2)}/serv)'
+                                                      : ' (+\$${(deltaPerServCents / 100).toStringAsFixed(2)}/serv)'));
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text('Replaced ${sourceIng.name} → ${candIng.name}$note'),
+                                              action: SnackBarAction(
+                                                label: 'Undo',
+                                                onPressed: () {
+                                                  _replaceItem(
+                                                    index: index,
+                                                    updated: item,
+                                                    ingredientById: byId,
+                                                  );
+                                                },
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
                                     );
                                   },
                                 ),
@@ -618,6 +676,216 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
         return 'pc';
     }
   }
+}
+
+// ---------- Substitute Sheet ----------
+class _SubstituteSheet extends ConsumerWidget {
+  const _SubstituteSheet({
+    required this.sourceItem,
+    required this.sourceIng,
+    required this.ingredientById,
+    this.onApply,
+  });
+  final RecipeItem sourceItem;
+  final domain.Ingredient sourceIng;
+  final Map<String, domain.Ingredient> ingredientById;
+  final Future<void> Function(domain.Ingredient candIng, double candQty, domain.Unit candUnit, bool approx, int? deltaPerServCents)? onApply;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final allIngredients = ingredientById.values.toList();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(left: 16, right: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16, top: 8),
+        child: FutureBuilder<List<_CandRow>>(
+          future: _buildCandidates(context, ref, allIngredients),
+          builder: (context, snap) {
+            final rows = snap.data ?? const <_CandRow>[];
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Substitute • ${sourceIng.name}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                if (rows.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: Text('No sensible alternatives found')),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemBuilder: (_, i) {
+                        final r = rows[i];
+                        final qtyStr = _fmtQty(r.qty, r.unit);
+                        final cheaper = r.deltaPerServCents != null && r.deltaPerServCents! < 0;
+                        return Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(r.ing.name, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                                    ),
+                                    FilledButton(
+                                      onPressed: r.qty <= 0 || r.unit == null
+                                          ? null
+                                          : () async {
+                                              if (onApply != null) {
+                                                await onApply!(r.ing, r.qty, r.unit!, r.approx, r.deltaPerServCents);
+                                              }
+                                              if (context.mounted) Navigator.of(context).pop();
+                                            },
+                                      child: const Text('Replace'),
+                                    )
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text('Use: $qtyStr'),
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 6,
+                                  children: [
+                                    if (r.pantry) _chip(context, 'Pantry', Icons.kitchen),
+                                    if (cheaper) _chip(context, 'Cheaper −\$${(-r.deltaPerServCents! / 100).toStringAsFixed(2)}/serv', Icons.savings),
+                                    if (r.approx) _chip(context, '≈ Approx', Icons.info_outline),
+                                  ],
+                                )
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemCount: rows.length,
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(width: double.infinity, child: TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<List<_CandRow>> _buildCandidates(BuildContext context, WidgetRef ref, List<domain.Ingredient> ings) async {
+    final svc = ref.read(substitutionsServiceProvider);
+    final cat = await svc.catalog();
+    final pantry = await ref.read(allPantryItemsProvider.future);
+    final onHand = pantry.fold<Map<String, double>>({}, (m, p) {
+      m[p.ingredientId] = (m[p.ingredientId] ?? 0) + p.qty;
+      return m;
+    });
+
+    final list = <domain.Ingredient>[];
+    // Catalog candidates
+    final catIds = cat[sourceIng.id]?.map((c) => c.ingredientId).toSet() ?? const <String>{};
+    for (final id in catIds) {
+      final ing = ingredientById[id];
+      if (ing != null) list.add(ing);
+    }
+    // Same-aisle heuristics (±30% kcal per100)
+    final per = sourceIng.per100;
+    if (per != null) {
+      final kcal = per.kcal;
+      for (final ing in ings) {
+        if (ing.id == sourceIng.id) continue;
+        if (ing.aisle != sourceIng.aisle) continue;
+        final p = ing.per100;
+        if (p == null || p.kcal <= 0) continue;
+        final ratio = p.kcal / kcal;
+        if (ratio >= 0.7 && ratio <= 1.3) list.add(ing);
+      }
+    }
+    // Unique by id
+    final seen = <String>{};
+    final uniq = <domain.Ingredient>[];
+    for (final ing in list) {
+      if (seen.add(ing.id)) uniq.add(ing);
+    }
+
+    final costSvc = ref.read(substitutionCostServiceProvider);
+    final rows = <_CandRow>[];
+    for (final cand in uniq) {
+      final res = SubstitutionMath.matchKcal(
+        sourceQty: sourceItem.qty,
+        sourceUnit: sourceItem.unit,
+        sourceIng: sourceIng,
+        candIng: cand,
+      );
+      if (res.qty == null || res.unit == null) {
+        rows.add(_CandRow(ing: cand, qty: 0, unit: null, approx: true, pantry: (onHand[cand.id] ?? 0) > 0, deltaPerServCents: null));
+        continue;
+      }
+      final delta = await costSvc.deltaCentsPerServ(
+        sourceIng: sourceIng,
+        sourceQty: sourceItem.qty,
+        sourceUnit: sourceItem.unit,
+        candIng: cand,
+        candQtyBase: res.qty!,
+      );
+      rows.add(_CandRow(ing: cand, qty: res.qty!.clamp(0.0, 999999.0), unit: res.unit, approx: res.approximate, pantry: (onHand[cand.id] ?? 0) > 0, deltaPerServCents: delta));
+    }
+    // Order: pantry first, cheaper better, then name
+    rows.sort((a, b) {
+      final pa = a.pantry ? 1 : 0;
+      final pb = b.pantry ? 1 : 0;
+      if (pa != pb) return pb.compareTo(pa);
+      final da = a.deltaPerServCents ?? 0;
+      final db = b.deltaPerServCents ?? 0;
+      if (da != db) return da.compareTo(db); // negative first
+      return a.ing.name.compareTo(b.ing.name);
+    });
+    return rows;
+  }
+
+  String _fmtQty(double? q, domain.Unit? u) {
+    if (q == null || u == null) return 'n/a';
+    final v = ((q * 10).round() / 10.0);
+    final s = v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    switch (u) {
+      case domain.Unit.grams:
+        return '$s g';
+      case domain.Unit.milliliters:
+        return '$s ml';
+      case domain.Unit.piece:
+        return '$s pc';
+    }
+  }
+
+  Widget _chip(BuildContext context, String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12),
+          const SizedBox(width: 4),
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _CandRow {
+  _CandRow({required this.ing, required this.qty, required this.unit, required this.approx, required this.pantry, required this.deltaPerServCents});
+  final domain.Ingredient ing;
+  final double qty;
+  final domain.Unit? unit;
+  final bool approx;
+  final bool pantry;
+  final int? deltaPerServCents;
 }
 
 class _ConversionHint extends StatelessWidget {

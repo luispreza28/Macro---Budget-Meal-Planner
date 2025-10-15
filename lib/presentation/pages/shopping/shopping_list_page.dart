@@ -16,6 +16,11 @@ import '../../../domain/services/store_profile_service.dart';
 import '../../../domain/services/trip_cost_service.dart';
 import 'package:intl/intl.dart';
 import '../../providers/store_compare_providers.dart';
+import '../../../domain/value/shortfall_item.dart' as v1;
+import '../../providers/pantry_providers.dart';
+import '../../../domain/services/substitutions_service.dart';
+import '../../../domain/services/substitution_math.dart';
+import '../../../domain/services/substitution_cost_service.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -499,6 +504,22 @@ class _AisleSection extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    PopupMenuButton<String>(
+                      tooltip: 'More',
+                      onSelected: (v) async {
+                        if (v == 'sub') {
+                          await showModalBottomSheet(
+                            context: context,
+                            isScrollControlled: true,
+                            showDragHandle: true,
+                            builder: (_) => _ShoppingSubstituteSheet(item: it),
+                          );
+                        }
+                      },
+                      itemBuilder: (context) => const [
+                        PopupMenuItem<String>(value: 'sub', child: Text('Substitute ingredient…')),
+                      ],
+                    ),
                     if (it.estimatedCostCents > 0)
                       Text(
                         '\$${(it.estimatedCostCents / 100).toStringAsFixed(2)}',
@@ -517,6 +538,131 @@ class _AisleSection extends StatelessWidget {
     );
   }
 }
+
+// Inline substitute sheet for shopping row
+class _ShoppingSubstituteSheet extends ConsumerWidget {
+  const _ShoppingSubstituteSheet({required this.item});
+  final AggregatedShoppingItem item;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ingsAsync = ref.watch(allIngredientsProvider);
+    return ingsAsync.when(
+      loading: () => const SizedBox(height: 200, child: Center(child: CircularProgressIndicator())),
+      error: (e, _) => Padding(padding: const EdgeInsets.all(16), child: Text('Failed: $e')),
+      data: (ings) {
+        final byId = {for (final i in ings) i.id: i};
+        return _SubSheetCore(
+          sourceQty: item.totalQty,
+          sourceUnit: item.unit,
+          sourceIng: item.ingredient,
+          ingredientById: byId,
+          onApply: (candIng, candQty, candUnit, approx, deltaPerServCents) async {
+            final plan = ref.read(currentPlanProvider).value;
+            final shop = ref.read(shoppingListRepositoryProvider);
+            final s = v1.ShortfallItem(
+              ingredientId: candIng.id,
+              name: candIng.name,
+              missingQty: candQty,
+              unit: candUnit,
+              aisle: candIng.aisle,
+            );
+            await shop.addShortfalls([s], planId: plan?.id);
+            ref.invalidate(shoppingListItemsProvider);
+            if (context.mounted) Navigator.of(context).pop();
+          },
+        );
+      },
+    );
+  }
+}
+
+class _SubSheetCore extends ConsumerWidget {
+  const _SubSheetCore({required this.sourceQty, required this.sourceUnit, required this.sourceIng, required this.ingredientById, required this.onApply});
+  final double sourceQty;
+  final ing.Unit sourceUnit;
+  final ing.Ingredient sourceIng;
+  final Map<String, ing.Ingredient> ingredientById;
+  final Future<void> Function(ing.Ingredient, double, ing.Unit, bool, int?) onApply;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(left: 16, right: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16, top: 8),
+        child: FutureBuilder<List<_CandRow>>(
+          future: _buildCandidates(ref),
+          builder: (context, snap) {
+            final rows = snap.data ?? const <_CandRow>[];
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Substitute • ${sourceIng.name}', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                if (rows.isEmpty)
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Center(child: Text('No sensible alternatives')))
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemBuilder: (_, i) {
+                        final r = rows[i];
+                        final qtyStr = _fmtQty(r.qty, r.unit);
+                        final cheaper = r.deltaPerServCents != null && r.deltaPerServCents! < 0;
+                        return Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [Expanded(child: Text(r.ing.name, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600))), FilledButton(onPressed: r.qty <= 0 || r.unit == null ? null : () async { await onApply(r.ing, r.qty, r.unit!, r.approx, r.deltaPerServCents); }, child: const Text('Replace'))]),
+                              const SizedBox(height: 6),
+                              Text('Use: $qtyStr'),
+                              const SizedBox(height: 6),
+                              Wrap(spacing: 6, children: [if (r.pantry) _chip(context, 'Pantry', Icons.kitchen), if (cheaper) _chip(context, 'Cheaper −\$${(-r.deltaPerServCents! / 100).toStringAsFixed(2)}/serv', Icons.savings), if (r.approx) _chip(context, '≈ Approx', Icons.info_outline)])
+                            ]),
+                          ),
+                        );
+                      },
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemCount: rows.length,
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                SizedBox(width: double.infinity, child: TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<List<_CandRow>> _buildCandidates(WidgetRef ref) async {
+    final svc = ref.read(substitutionCostServiceProvider);
+    final catSvc = ref.read(substitutionsServiceProvider);
+    final cat = await catSvc.catalog();
+    final pantry = await ref.read(allPantryItemsProvider.future);
+    final onHand = {for (final p in pantry) p.ingredientId: p.qty};
+    final all = ingredientById.values.toList();
+    final list = <ing.Ingredient>[];
+    final catIds = cat[sourceIng.id]?.map((c) => c.ingredientId).toSet() ?? const <String>{};
+    for (final id in catIds) { final i = ingredientById[id]; if (i != null) list.add(i); }
+    final per = sourceIng.per100; if (per != null) { final kcal = per.kcal; for (final i in all) { if (i.id == sourceIng.id) continue; if (i.aisle != sourceIng.aisle) continue; final p = i.per100; if (p == null || p.kcal <= 0) continue; final ratio = p.kcal / kcal; if (ratio >= 0.7 && ratio <= 1.3) list.add(i); } }
+    final seen = <String>{}; final uniq = <ing.Ingredient>[]; for (final i in list) { if (seen.add(i.id)) uniq.add(i); }
+    final rows = <_CandRow>[];
+    for (final cand in uniq) {
+      final res = SubstitutionMath.matchKcal(sourceQty: sourceQty, sourceUnit: sourceUnit, sourceIng: sourceIng, candIng: cand);
+      if (res.qty == null || res.unit == null) { rows.add(_CandRow(ing: cand, qty: 0, unit: null, approx: true, pantry: (onHand[cand.id] ?? 0) > 0, deltaPerServCents: null)); continue; }
+      final delta = await svc.deltaCentsPerServ(sourceIng: sourceIng, sourceQty: sourceQty, sourceUnit: sourceUnit, candIng: cand, candQtyBase: res.qty!);
+      rows.add(_CandRow(ing: cand, qty: res.qty!, unit: res.unit, approx: res.approximate, pantry: (onHand[cand.id] ?? 0) > 0, deltaPerServCents: delta));
+    }
+    rows.sort((a, b) { final pa = a.pantry ? 1 : 0; final pb = b.pantry ? 1 : 0; if (pa != pb) return pb.compareTo(pa); final da = a.deltaPerServCents ?? 0; final db = b.deltaPerServCents ?? 0; if (da != db) return da.compareTo(db); return a.ing.name.compareTo(b.ing.name); });
+    return rows;
+  }
+
+  String _fmtQty(double? q, ing.Unit? u) { if (q == null || u == null) return 'n/a'; final v = ((q * 10).round() / 10.0); final s = v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1); switch (u) { case ing.Unit.grams: return '$s g'; case ing.Unit.milliliters: return '$s ml'; case ing.Unit.piece: return '$s pc'; } }
+  Widget _chip(BuildContext context, String label, IconData icon) { return Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(999)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 12), const SizedBox(width: 4), Text(label, style: Theme.of(context).textTheme.labelSmall)])); }
+}
+
+class _CandRow { _CandRow({required this.ing, required this.qty, required this.unit, required this.approx, required this.pantry, required this.deltaPerServCents}); final ing.Ingredient ing; final double qty; final ing.Unit? unit; final bool approx; final bool pantry; final int? deltaPerServCents; }
 
 class _StoreSwitcher extends StatelessWidget {
   const _StoreSwitcher({
