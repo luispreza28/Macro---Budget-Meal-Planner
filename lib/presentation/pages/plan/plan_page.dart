@@ -30,6 +30,7 @@ import '../../providers/ingredient_providers.dart';
 import '../../providers/shortfall_providers.dart';
 import '../../providers/database_providers.dart';
 import '../../providers/budget_providers.dart';
+import 'budget_optimize_sheet.dart';
 import '../../providers/shopping_list_providers.dart';
 import '../../providers/plan_pin_providers.dart';
 import '../../providers/recipe_pref_providers.dart';
@@ -41,6 +42,9 @@ import '../../../domain/services/leftovers_inventory_service.dart';
 import '../../../domain/services/leftovers_scheduler_service.dart';
 import '../../providers/pantry_expiry_providers.dart';
 import '../../providers/multiweek_providers.dart';
+import '../../../domain/services/budget_optimizer_service.dart';
+import '../../../domain/services/budget_settings_service.dart';
+import '../../../domain/services/plan_cost_estimator.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -299,6 +303,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
                                 showBudget: decorated.base.budgetCents != null,
+                              ),
+
+                              // Budget Guardrails v2: Weekly Budget Bar
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: _buildBudgetBar(plan: plan),
                               ),
 
                               // Week navigator if part of a series
@@ -870,6 +880,103 @@ class _PhaseBanner extends StatelessWidget {
     );
   }
 
+  // Budget Bar widget: price-aware estimate vs user-set budget in SharedPreferences
+  Widget _buildBudgetBar({required Plan plan}) {
+    final settingsAsync = ref.watch(budgetSettingsProvider);
+    final statusAsync = ref.watch(weeklyBudgetStatusProvider(plan));
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Budget', style: Theme.of(context).textTheme.titleMedium),
+                ),
+                TextButton.icon(
+                  onPressed: () => context.push('/settings/budget'),
+                  icon: const Icon(Icons.settings_outlined, size: 18),
+                  label: const Text('Settings'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            settingsAsync.when(
+              loading: () => const LinearProgressIndicator(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (settings) {
+                return statusAsync.when(
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => const SizedBox.shrink(),
+                  data: (s) {
+                    final pct = s.budgetCents <= 0 ? 0.0 : (s.estimateCents / s.budgetCents).clamp(0.0, 1.0);
+                    final over = s.estimateCents > s.budgetCents;
+                    final tight = !over && s.estimateCents >= (s.budgetCents * 0.9);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        LinearProgressIndicator(value: s.budgetCents == 0 ? null : pct),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(child: Text(s.label)),
+                            if (over)
+                              _chip('Over by ${NumberFormat.simpleCurrency().format((s.estimateCents - s.budgetCents)/100)}', Colors.red)
+                            else if (tight)
+                              _chip('Tight: ${NumberFormat.simpleCurrency().format((s.budgetCents - s.estimateCents)/100)} left', Colors.orange)
+                            else
+                              _chip('${NumberFormat.simpleCurrency().format((s.budgetCents - s.estimateCents)/100)} left', Colors.green),
+                          ],
+                        ),
+                        if (settings.showNudges) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.auto_awesome),
+                                label: const Text('Optimize Cost'),
+                                onPressed: () async {
+                                  await showModalBottomSheet(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    builder: (_) => BudgetOptimizeSheet(plan: plan),
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              if (over)
+                                Text('You’ll exceed by ~${NumberFormat.simpleCurrency().format((s.estimateCents - s.budgetCents)/100)}',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(text, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color)),
+    );
+  }
+
   Widget _buildSwapDrawer(
     Plan plan,
     Map<String, Recipe> recipeMap,
@@ -1147,7 +1254,7 @@ class _PhaseBanner extends StatelessWidget {
           : const <Plan>[];
 
       final generator = ref.read(planGenerationServiceProvider);
-      final plan = await generator.generate(
+      var plan = await generator.generate(
         targets: decorated.toUserTargets(),
         recipes: recipes,
         ingredients: ingredients,
@@ -1163,6 +1270,50 @@ class _PhaseBanner extends StatelessWidget {
           historyPlans: recent,
         ),
       );
+
+      // Budget Guardrails v2: auto-cheap mode (post-generation, advisory)
+      final budgetSettings = await ref.read(budgetSettingsServiceProvider).get();
+      if (budgetSettings.autoCheapMode) {
+        final estimator = ref.read(planCostEstimatorProvider);
+        final est = await estimator.estimatePlanCostCents(plan: plan, storeId: budgetSettings.preferredStoreId);
+        final over = est - budgetSettings.weeklyBudgetCents;
+        if (over > 0) {
+          final optimizer = ref.read(budgetOptimizerServiceProvider);
+          final suggestions = await optimizer.suggestCheaperSwaps(
+            plan: plan,
+            targetSaveCents: over,
+          );
+          if (suggestions.isNotEmpty) {
+            // Apply up to maxAutoSwaps
+            final recipesAll = await ref.read(allRecipesProvider.future);
+            final recipeMap = {for (final r in recipesAll) r.id: r};
+            final newDays = plan.days.map((d) => d).toList(growable: true);
+            for (final s in suggestions.take(budgetSettings.maxAutoSwaps)) {
+              final day = newDays[s.dayIndex];
+              final meals = day.meals.map((m) => m).toList(growable: true);
+              meals[s.mealIndex] = meals[s.mealIndex].copyWith(recipeId: s.toRecipeId);
+              newDays[s.dayIndex] = day.copyWith(meals: meals);
+            }
+            // Recompute totals (using fallback per-recipe cost)
+            double kcal = 0, protein = 0, carbs = 0, fat = 0; int cost = 0;
+            for (final day in newDays) {
+              for (final meal in day.meals) {
+                final r = recipeMap[meal.recipeId];
+                if (r == null) continue;
+                kcal += r.macrosPerServ.kcal * meal.servings;
+                protein += r.macrosPerServ.proteinG * meal.servings;
+                carbs += r.macrosPerServ.carbsG * meal.servings;
+                fat += r.macrosPerServ.fatG * meal.servings;
+                cost += (r.costPerServCents * meal.servings).round();
+              }
+            }
+            plan = plan.copyWith(days: newDays, totals: PlanTotals(kcal: kcal, proteinG: protein, carbsG: carbs, fatG: fat, costCents: cost));
+            if (kDebugMode) {
+              debugPrint('[Budget] auto-cheap applied: ${suggestions.length} swaps');
+            }
+          }
+        }
+      }
 
       final notifier = ref.read(planNotifierProvider.notifier);
       await notifier.savePlan(plan);

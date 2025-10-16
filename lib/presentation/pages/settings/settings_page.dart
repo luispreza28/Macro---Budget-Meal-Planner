@@ -154,6 +154,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
 
           const SizedBox(height: 16),
+          // Budget Guardrails
+          _buildSectionHeader('Budget'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.savings_outlined),
+                  title: const Text('Budget Guardrails'),
+                  subtitle: const Text('Budget, nudges, auto-cheap mode'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push(AppRouter.budgetSettings),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
 
           // Shopping section
           _buildSectionHeader('Shopping'),

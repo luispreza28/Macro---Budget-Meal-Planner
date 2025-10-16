@@ -11,6 +11,7 @@ import '../pages/pantry/pantry_page.dart';
 import '../pages/settings/settings_page.dart';
 import '../pages/settings/taste_profile_page.dart';
 import '../pages/settings/store_profiles_page.dart';
+import '../pages/settings/budget_settings_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
 import '../pages/pricing/price_history_page.dart';
 import '../pages/import/import_recipe_page.dart';
@@ -54,6 +55,7 @@ class AppRouter {
   static const String priceHistory = '/pricing/history';
   static const String settings = '/settings';
   static const String tasteSettings = '/settings/taste';
+  static const String budgetSettings = '/settings/budget';
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
   static const String importRecipe = '/import';
@@ -133,6 +135,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const SettingsPage(),
+      ),
+    ),
+    GoRoute(
+      path: budgetSettings,
+      name: 'settings-budget',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const BudgetSettingsPage(),
       ),
     ),
     GoRoute(
