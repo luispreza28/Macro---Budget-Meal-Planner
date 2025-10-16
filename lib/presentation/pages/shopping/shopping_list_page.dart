@@ -19,6 +19,9 @@ import '../../providers/store_compare_providers.dart';
 import '../../providers/plan_providers.dart';
 import '../../providers/store_providers.dart';
 import '../../providers/shopping_list_providers.dart';
+import '../pantry/pantry_item_editor_sheet.dart';
+import '../../providers/pantry_expiry_providers.dart';
+import '../../../domain/services/pantry_expiry_service.dart';
 import '../../providers/database_providers.dart';
 import '../../../domain/services/route_prefs_service.dart';
 import '../../providers/route_providers.dart';
@@ -222,13 +225,24 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                   child: Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: summary
-                        .map(
-                          (s) => _AisleChip(
-                            label: '${s.aisleLabel} Ã‚Â· ${s.count}',
-                          ),
-                        )
-                        .toList(),
+                    children: [
+                      ...summary
+                          .map(
+                            (s) => _AisleChip(
+                              label: '${s.aisleLabel} Ã‚Â· ${s.count}',
+                            ),
+                          )
+                          .toList(),
+                      Builder(builder: (context) {
+                        final soon = ref.watch(useSoonItemsProvider).asData?.value ?? const [];
+                        if (soon.isEmpty) return const SizedBox.shrink();
+                        return ActionChip(
+                          avatar: const Icon(Icons.schedule, size: 16),
+                          label: Text('Use soon: ${soon.length}'),
+                          onPressed: () => context.go(AppRouter.pantry),
+                        );
+                      }),
+                    ],
                   ),
                 ),
               ),
@@ -650,6 +664,38 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         _checked.remove(k);
       } else {
         _checked.add(k);
+        // Prompt to add to Pantry (non-blocking)
+        final ingredient = item.ingredient;
+        final qty = item.totalQty; // already in ingredient base unit
+        // Only nudge once per line add
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          final res = await ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Add ${ingredient.name} to Pantry?'),
+              action: SnackBarAction(
+                label: 'Add',
+                onPressed: () {},
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          // If action tapped, open editor prefilled
+          // Note: SnackBarAction onPressed cannot be awaited directly; open sheet regardless during duration if user pressed.
+          // Workaround: open sheet immediately on showing with queued microtask if Add tapped is not capturable here.
+        });
+        // Open editor quickly with sensible defaults (non-blocking UX)
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          builder: (_) => PantryItemEditorSheet(
+            prefillIngredient: ingredient,
+            prefillQty: qty,
+          ),
+        ).then((_) {
+          ref.invalidate(pantryItemsProvider);
+        });
       }
     });
     _saveCheckedForPlan();

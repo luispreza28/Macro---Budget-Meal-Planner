@@ -36,6 +36,7 @@ import '../../providers/leftovers_providers.dart';
 import '../../../domain/services/leftovers_overlay_service.dart';
 import '../../../domain/services/leftovers_inventory_service.dart';
 import '../../../domain/services/leftovers_scheduler_service.dart';
+import '../../providers/pantry_expiry_providers.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -263,6 +264,26 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
                                 showBudget: targets.budgetCents != null,
+                              ),
+
+                              // Use soon nudge
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                child: Builder(builder: (context) {
+                                  // Lazy import via function body to avoid new imports at top for providers
+                                  return Consumer(builder: (context, ref, _) {
+                                    final soon = ref.watch(useSoonItemsProvider).asData?.value ?? const [];
+                                    if (soon.isEmpty) return const SizedBox.shrink();
+                                    return Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: ActionChip(
+                                        avatar: const Icon(Icons.schedule, size: 16),
+                                        label: Text('Use soon: ${soon.length}'),
+                                        onPressed: () => context.go(AppRouter.pantry),
+                                      ),
+                                    );
+                                  });
+                                }),
                               ),
 
                               // Budget header (weekly)

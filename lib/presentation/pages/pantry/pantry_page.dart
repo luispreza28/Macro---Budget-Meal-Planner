@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../router/app_router.dart';
-// import '../../providers/pantry_providers.dart';
-// import '../../providers/ingredient_providers.dart';
-import '../../widgets/pantry_widgets/pantry_item_card.dart';
-import '../../widgets/pantry_widgets/add_pantry_item_dialog.dart';
 import '../../widgets/pro_feature_gate.dart';
-import '../../../domain/entities/ingredient.dart';
-import '../../../domain/entities/pantry_item.dart';
+import '../../../domain/entities/ingredient.dart' as domain;
+import '../../../domain/services/pantry_expiry_service.dart';
+import '../../../domain/services/waste_log_service.dart';
+import '../../providers/ingredient_providers.dart';
+import '../../providers/pantry_expiry_providers.dart';
+import 'pantry_item_editor_sheet.dart';
+import 'waste_insights_card.dart';
 
-/// Comprehensive pantry management page (Pro feature)
+/// Pantry page with expiry tracking, actions, and insights
 class PantryPage extends ConsumerStatefulWidget {
   const PantryPage({super.key});
 
@@ -19,96 +22,18 @@ class PantryPage extends ConsumerStatefulWidget {
   ConsumerState<PantryPage> createState() => _PantryPageState();
 }
 
+enum _PantryTab { all, soon, expired }
+
 class _PantryPageState extends ConsumerState<PantryPage> {
-  String _searchQuery = '';
-  String _selectedAisle = 'all';
-  bool _showExpiringOnly = false;
-  List<PantryItem> _mockPantryItems = [];
-  List<Ingredient> _mockIngredients = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeMockData();
-  }
-
-  void _initializeMockData() {
-    // Mock ingredients data
-    _mockIngredients = [
-      Ingredient(
-        id: '1',
-        name: 'Chicken Breast',
-        unit: Unit.grams,
-        macrosPer100g: const MacrosPerHundred(kcal: 165, proteinG: 31, carbsG: 0, fatG: 3.6),
-        pricePerUnitCents: 899,
-        purchasePack: const PurchasePack(qty: 1000, unit: Unit.grams, priceCents: 899),
-        aisle: Aisle.meat,
-        tags: ['high_protein', 'lean'],
-        source: IngredientSource.seed,
-      ),
-      Ingredient(
-        id: '2',
-        name: 'Brown Rice',
-        unit: Unit.grams,
-        macrosPer100g: const MacrosPerHundred(kcal: 111, proteinG: 2.6, carbsG: 23, fatG: 0.9),
-        pricePerUnitCents: 199,
-        purchasePack: const PurchasePack(qty: 1000, unit: Unit.grams, priceCents: 199),
-        aisle: Aisle.pantry,
-        tags: ['cheap', 'bulk'],
-        source: IngredientSource.seed,
-      ),
-      Ingredient(
-        id: '3',
-        name: 'Olive Oil',
-        unit: Unit.milliliters,
-        macrosPer100g: const MacrosPerHundred(kcal: 884, proteinG: 0, carbsG: 0, fatG: 100),
-        pricePerUnitCents: 899,
-        purchasePack: const PurchasePack(qty: 500, unit: Unit.milliliters, priceCents: 899),
-        aisle: Aisle.condiments,
-        tags: ['healthy_fat'],
-        source: IngredientSource.seed,
-      ),
-      Ingredient(
-        id: '4',
-        name: 'Milk',
-        unit: Unit.milliliters,
-        macrosPer100g: const MacrosPerHundred(kcal: 42, proteinG: 3.4, carbsG: 5, fatG: 1),
-        pricePerUnitCents: 399,
-        purchasePack: const PurchasePack(qty: 1000, unit: Unit.milliliters, priceCents: 399),
-        aisle: Aisle.dairy,
-        tags: ['expiring'],
-        source: IngredientSource.seed,
-      ),
-    ];
-
-    // Mock pantry items
-    _mockPantryItems = [
-      PantryItem(
-        id: 'pantry_1',
-        ingredientId: '1',
-        qty: 500,
-        unit: Unit.grams,
-        addedAt: DateTime.now().subtract(const Duration(days: 2)),
-      ),
-      PantryItem(
-        id: 'pantry_2',
-        ingredientId: '2',
-        qty: 800,
-        unit: Unit.grams,
-        addedAt: DateTime.now().subtract(const Duration(days: 5)),
-      ),
-      PantryItem(
-        id: 'pantry_3',
-        ingredientId: '4',
-        qty: 250,
-        unit: Unit.milliliters,
-        addedAt: DateTime.now().subtract(const Duration(days: 1)),
-      ),
-    ];
-  }
+  _PantryTab _tab = _PantryTab.all;
+  String _search = '';
 
   @override
   Widget build(BuildContext context) {
+    final itemsAsync = ref.watch(pantryItemsProvider);
+    final soonAsync = ref.watch(useSoonItemsProvider);
+    final expiredAsync = ref.watch(expiredItemsProvider);
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -122,474 +47,354 @@ class _PantryPageState extends ConsumerState<PantryPage> {
             }
           },
         ),
-        title: Row(
-          children: const [
-            Text('Pantry'),
-            SizedBox(width: 8),
-            ProBadge(),
-          ],
-        ),
+        title: const Text('Pantry'),
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _openEditor(),
+        child: const Icon(Icons.add),
+      ),
       body: ProFeatureGate(
         featureName: 'pantry',
-        child: _buildPantryContent(context),
-      ),
-    );
-  }
-
-  Widget _buildPantryContent(BuildContext context) {
-    final filteredItems = _getFilteredPantryItems();
-
-    return Column(
-      children: [
-        // Action bar
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Pantry-first planning saves money by using items you already have',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                onPressed: _showAddItemDialog,
-                icon: const Icon(Icons.add),
-                tooltip: 'Add Item',
-              ),
-              PopupMenuButton(
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: 'clear_expired',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete_sweep),
-                        SizedBox(width: 8),
-                        Text('Clear Expired'),
-                      ],
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'export',
-                    child: Row(
-                      children: [
-                        Icon(Icons.share),
-                        SizedBox(width: 8),
-                        Text('Export List'),
-                      ],
-                    ),
-                  ),
-                ],
-                onSelected: (value) {
-                  switch (value) {
-                    case 'clear_expired':
-                      _clearExpiredItems();
-                      break;
-                    case 'export':
-                      _exportPantryList();
-                      break;
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-
-        // Summary cards
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: const [
-              Expanded(
-                child: _SummaryCard(
-                  title: 'Total Items',
-                  value: '—',
-                  icon: Icons.kitchen,
-                  color: Colors.blue,
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _SummaryCard(
-                  title: 'Expiring Soon',
-                  value: '—',
-                  icon: Icons.warning,
-                  color: Colors.orange,
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _SummaryCard(
-                  title: 'Total Value',
-                  value: '\$—',
-                  icon: Icons.attach_money,
-                  color: Colors.green,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // Filters
-        _buildFilters(),
-
-        const SizedBox(height: 8),
-
-        // Pantry items list
-        Expanded(
-          child: filteredItems.isEmpty
-              ? _buildEmptyState()
-              : ListView.builder(
-                  itemCount: filteredItems.length,
-                  itemBuilder: (context, index) {
-                    final pantryItem = filteredItems[index];
-                    final ingredient = _getIngredientById(pantryItem.ingredientId);
-
-                    if (ingredient == null) return const SizedBox.shrink();
-
-                    return PantryItemCard(
-                      pantryItem: pantryItem,
-                      ingredient: ingredient,
-                      onQuantityChanged: (quantity) {
-                        _updateItemQuantity(pantryItem, quantity);
-                      },
-                      onRemove: () {
-                        _removeItem(pantryItem);
-                      },
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFilters() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: [
-          // Search bar
-          TextField(
-            onChanged: (value) => setState(() => _searchQuery = value),
-            decoration: const InputDecoration(
-              hintText: 'Search pantry items...',
-              prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Filter chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                FilterChip(
-                  label: const Text('All'),
-                  selected: _selectedAisle == 'all',
-                  onSelected: (selected) {
-                    setState(() => _selectedAisle = 'all');
-                  },
-                ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('Expiring Soon'),
-                  selected: _showExpiringOnly,
-                  onSelected: (selected) {
-                    setState(() => _showExpiringOnly = selected);
-                  },
-                ),
-                const SizedBox(width: 8),
-                ..._getAvailableAisles().map((aisle) {
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: FilterChip(
-                      label: Text(_getAisleDisplayName(aisle)),
-                      selected: _selectedAisle == aisle,
-                      onSelected: (selected) {
-                        setState(() => _selectedAisle = selected ? aisle : 'all');
-                      },
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(
-            Icons.kitchen_outlined,
-            size: 64,
-            color: Colors.grey,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _searchQuery.isNotEmpty || _selectedAisle != 'all' || _showExpiringOnly
-                ? 'No items match your filters'
-                : 'Your pantry is empty',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _searchQuery.isNotEmpty || _selectedAisle != 'all' || _showExpiringOnly
-                ? 'Try adjusting your search or filters'
-                : 'Add ingredients you have on hand to get started',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _showAddItemDialog,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Item'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  List<PantryItem> _getFilteredPantryItems() {
-    var filtered = _mockPantryItems;
-
-    // Filter by search query
-    if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((item) {
-        final ingredient = _getIngredientById(item.ingredientId);
-        return ingredient?.name.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false;
-      }).toList();
-    }
-
-    // Filter by aisle
-    if (_selectedAisle != 'all') {
-      filtered = filtered.where((item) {
-        final ingredient = _getIngredientById(item.ingredientId);
-        return ingredient?.aisle.name == _selectedAisle;
-      }).toList();
-    }
-
-    // Filter by expiring items
-    if (_showExpiringOnly) {
-      filtered = filtered.where((item) {
-        final ingredient = _getIngredientById(item.ingredientId);
-        return ingredient?.tags.contains('expiring') ?? false;
-      }).toList();
-    }
-
-    return filtered;
-  }
-
-  Ingredient? _getIngredientById(String id) {
-    try {
-      return _mockIngredients.firstWhere((ingredient) => ingredient.id == id);
-    } catch (_) {
-      return null;
-    }
-    }
-
-  List<String> _getAvailableAisles() {
-    return _mockPantryItems
-        .map((item) => _getIngredientById(item.ingredientId)?.aisle.name)
-        .where((aisle) => aisle != null)
-        .cast<String>()
-        .toSet()
-        .toList();
-  }
-
-  int _getExpiringItemsCount() {
-    return _mockPantryItems.where((item) {
-      final ingredient = _getIngredientById(item.ingredientId);
-      return ingredient?.tags.contains('expiring') ?? false;
-    }).length;
-  }
-
-  double _calculateTotalValue() {
-    return _mockPantryItems.fold<double>(0.0, (total, item) {
-      final ingredient = _getIngredientById(item.ingredientId);
-      if (ingredient == null) return total;
-      return total + (item.qty * ingredient.pricePerUnitCents / 100);
-    });
-  }
-
-  void _showAddItemDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AddPantryItemDialog(
-        availableIngredients: _mockIngredients,
-        onAdd: (ingredient, quantity) {
-          setState(() {
-            _mockPantryItems.add(PantryItem(
-              id: 'pantry_${DateTime.now().millisecondsSinceEpoch}',
-              ingredientId: ingredient.id,
-              qty: quantity,
-              unit: ingredient.unit,
-              addedAt: DateTime.now(),
-            ));
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Added ${ingredient.name} to pantry'),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _updateItemQuantity(PantryItem item, double quantity) {
-    setState(() {
-      final index = _mockPantryItems.indexOf(item);
-      if (index >= 0) {
-        _mockPantryItems[index] = PantryItem(
-          id: item.id,
-          ingredientId: item.ingredientId,
-          qty: quantity,
-          unit: item.unit,
-          addedAt: item.addedAt,
-        );
-      }
-    });
-  }
-
-  void _removeItem(PantryItem item) {
-    setState(() {
-      _mockPantryItems.remove(item);
-    });
-
-    final ingredient = _getIngredientById(item.ingredientId);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Removed ${ingredient?.name ?? 'item'} from pantry'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () {
-            setState(() {
-              _mockPantryItems.add(item);
-            });
-          },
-        ),
-      ),
-    );
-  }
-
-  void _clearExpiredItems() {
-    final expiredItems = _mockPantryItems.where((item) {
-      final ingredient = _getIngredientById(item.ingredientId);
-      return ingredient?.tags.contains('expiring') ?? false;
-    }).toList();
-
-    if (expiredItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No expired items to clear')),
-      );
-      return;
-    }
-
-    setState(() {
-      _mockPantryItems.removeWhere((item) {
-        final ingredient = _getIngredientById(item.ingredientId);
-        return ingredient?.tags.contains('expiring') ?? false;
-      });
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Cleared ${expiredItems.length} expired items'),
-      ),
-    );
-  }
-
-  void _exportPantryList() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Export functionality will be available in Stage 5'),
-      ),
-    );
-  }
-
-  String _getAisleDisplayName(String aisle) {
-    switch (aisle.toLowerCase()) {
-      case 'produce':
-        return 'Produce';
-      case 'meat':
-        return 'Meat';
-      case 'dairy':
-        return 'Dairy';
-      case 'pantry':
-        return 'Pantry';
-      case 'frozen':
-        return 'Frozen';
-      case 'condiments':
-        return 'Condiments';
-      case 'bakery':
-        return 'Bakery';
-      case 'household':
-        return 'Household';
-      default:
-        return aisle;
-    }
-  }
-}
-
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-  });
-
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 24),
             const SizedBox(height: 8),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
+            const WasteInsightsCard(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: TextField(
+                decoration: const InputDecoration(
+                  hintText: 'Search pantry items…',
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onChanged: (v) => setState(() => _search = v.trim()),
+              ),
             ),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('All'),
+                    selected: _tab == _PantryTab.all,
+                    onSelected: (_) => setState(() => _tab = _PantryTab.all),
                   ),
-              textAlign: TextAlign.center,
+                  ChoiceChip(
+                    label: soonAsync.maybeWhen(data: (xs) => Text('Use soon (${xs.length})'), orElse: () => const Text('Use soon')),
+                    selected: _tab == _PantryTab.soon,
+                    onSelected: (_) => setState(() => _tab = _PantryTab.soon),
+                  ),
+                  ChoiceChip(
+                    label: expiredAsync.maybeWhen(data: (xs) => Text('Expired (${xs.length})'), orElse: () => const Text('Expired')),
+                    selected: _tab == _PantryTab.expired,
+                    onSelected: (_) => setState(() => _tab = _PantryTab.expired),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: itemsAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(child: Text('Failed to load pantry: $e')),
+                data: (items) {
+                  List<PantryItem> xs = items.where((x) => !x.consumed && !x.discarded).toList();
+                  if (_tab == _PantryTab.soon) {
+                    final soon = soonAsync.asData?.value ?? const <PantryItem>[];
+                    xs = soon;
+                  } else if (_tab == _PantryTab.expired) {
+                    final expired = expiredAsync.asData?.value ?? const <PantryItem>[];
+                    xs = expired;
+                  }
+                  if (_search.isNotEmpty) {
+                    // Filter by ingredient name
+                    xs = xs.where((p) {
+                      final ing = ref.read(ingredientByIdProvider(p.ingredientId)).asData?.value;
+                      return (ing?.name.toLowerCase().contains(_search.toLowerCase()) ?? false);
+                    }).toList();
+                  }
+                  if (xs.isEmpty) {
+                    return const _EmptyView();
+                  }
+                  return ListView.builder(
+                    itemCount: xs.length,
+                    itemBuilder: (ctx, i) => _PantryListTile(item: xs[i]),
+                  );
+                },
+              ),
             ),
           ],
         ),
       ),
     );
   }
+
+  Future<void> _openEditor({PantryItem? initial, domain.Ingredient? ing}) async {
+    await showModalBottomSheet<PantryItem>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => PantryItemEditorSheet(initial: initial, prefillIngredient: ing),
+    );
+    ref.invalidate(pantryItemsProvider);
+  }
 }
+
+class _PantryListTile extends ConsumerWidget {
+  const _PantryListTile({required this.item});
+  final PantryItem item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ingAsync = ref.watch(ingredientByIdProvider(item.ingredientId));
+    final fmt = DateFormat.yMMMd();
+    final now = DateTime.now();
+    final d = item.expiresAt ?? item.bestBy;
+    final isExpired = d != null && d.isBefore(now);
+    final soon = () {
+      if (d == null) return false;
+      final diff = d.difference(DateTime(now.year, now.month, now.day)).inDays;
+      return diff <= 3 && diff >= 0;
+    }();
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: ListTile(
+        title: ingAsync.when(
+          loading: () => const Text('…'),
+          error: (e, _) => Text(item.ingredientId),
+          data: (ing) => Text(ing?.name ?? item.ingredientId),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${_fmtQty(item.qty)} ${item.unit.value}'),
+            Row(children: [
+              if (item.openedAt != null) _Badge(label: 'Opened'),
+              if (soon) _Badge(label: 'Use soon'),
+              if (isExpired) _Badge(label: 'Expired', color: Theme.of(context).colorScheme.error),
+            ]),
+            if (d != null) Text('${item.expiresAt != null ? 'Expires' : 'Best-by'}: ${fmt.format(d)} ${_relativeDays(d)}'),
+            if (item.note != null && item.note!.isNotEmpty) Text(item.note!),
+          ],
+        ),
+        trailing: PopupMenuButton<String>(
+          tooltip: 'Actions',
+          onSelected: (v) async {
+            switch (v) {
+              case 'consume':
+                await _consume(context, ref, item);
+                break;
+              case 'discard':
+                await _discard(context, ref, item);
+                break;
+              case 'extend':
+                await _extend(context, ref, item);
+                break;
+              case 'edit':
+                final ing = ref.read(ingredientByIdProvider(item.ingredientId)).asData?.value;
+                await showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  showDragHandle: true,
+                  builder: (_) => PantryItemEditorSheet(initial: item, prefillIngredient: ing),
+                );
+                ref.invalidate(pantryItemsProvider);
+                break;
+            }
+          },
+          itemBuilder: (ctx) => const [
+            PopupMenuItem<String>(value: 'consume', child: Text('Consume…')),
+            PopupMenuItem<String>(value: 'discard', child: Text('Discard…')),
+            PopupMenuItem<String>(value: 'extend', child: Text('Extend…')),
+            PopupMenuItem<String>(value: 'edit', child: Text('Edit…')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmtQty(double v) => v.toStringAsFixed(v.truncateToDouble() == v ? 0 : 1);
+
+  String _relativeDays(DateTime d) {
+    final anchor = DateTime.now();
+    final diff = d.difference(DateTime(anchor.year, anchor.month, anchor.day)).inDays;
+    if (diff == 0) return '(today)';
+    if (diff > 0) return '(in $diff days)';
+    return '(${diff.abs()} days ago)';
+  }
+
+  Future<void> _consume(BuildContext ctx, WidgetRef ref, PantryItem item) async {
+    final qty = await _pickQty(ctx, max: item.qty, initial: item.qty);
+    if (qty == null) return;
+    final newQty = (item.qty - qty).clamp(0, double.infinity);
+    final updated = item.copyWith(qty: newQty, consumed: newQty == 0 ? true : null);
+    await ref.read(pantryExpiryServiceProvider).upsert(updated);
+    ref.invalidate(pantryItemsProvider);
+    if (newQty == 0) {
+      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Consumed — waste avoided')));
+    }
+  }
+
+  Future<void> _discard(BuildContext ctx, WidgetRef ref, PantryItem item) async {
+    final result = await showDialog<(double, String)?>(
+      context: ctx,
+      builder: (dctx) {
+        final qtyCtrl = TextEditingController(text: _fmtQty(item.qty));
+        String reason = 'expired';
+        return AlertDialog(
+          title: const Text('Discard'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: qtyCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(suffixText: item.unit.value, labelText: 'Quantity'),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: reason,
+                decoration: const InputDecoration(labelText: 'Reason'),
+                items: const [
+                  DropdownMenuItem(value: 'expired', child: Text('Expired')),
+                  DropdownMenuItem(value: 'spoiled', child: Text('Spoiled')),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: (v) => reason = v ?? 'expired',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dctx).pop(), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                final q = double.tryParse(qtyCtrl.text) ?? 0;
+                Navigator.of(dctx).pop((q, reason));
+              },
+              child: const Text('Discard'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == null) return;
+    final qty = result.$1.clamp(0, item.qty);
+    final reason = result.$2;
+
+    // Cost estimate
+    final ing = await ref.read(ingredientByIdProvider(item.ingredientId).future);
+    int estimateCents = 0;
+    if (ing != null) {
+      final packPrice = ing.purchasePack.priceCents;
+      final ppu = (packPrice != null && ing.purchasePack.qty > 0)
+          ? (packPrice / ing.purchasePack.qty)
+          : ing.pricePerUnitCents.toDouble();
+      estimateCents = (qty * ppu).round();
+    }
+
+    final ev = WasteEvent(
+      id: const Uuid().v4(),
+      ingredientId: item.ingredientId,
+      qty: qty,
+      unit: item.unit.value,
+      at: DateTime.now(),
+      reason: reason,
+      costCentsEstimate: estimateCents,
+    );
+    await ref.read(wasteLogServiceProvider).add(ev);
+
+    final updated = item.copyWith(qty: (item.qty - qty).clamp(0, double.infinity), discarded: true);
+    await ref.read(pantryExpiryServiceProvider).upsert(updated);
+    ref.invalidate(pantryItemsProvider);
+  }
+
+  Future<void> _extend(BuildContext ctx, WidgetRef ref, PantryItem item) async {
+    final days = await showDialog<int?>(
+      context: ctx,
+      builder: (dctx) {
+        final ctrl = TextEditingController(text: '3');
+        return AlertDialog(
+          title: const Text('Extend / Snooze'),
+          content: TextField(
+            controller: ctrl,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Days'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dctx).pop(), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.of(dctx).pop(int.tryParse(ctrl.text) ?? 0), child: const Text('Apply')),
+          ],
+        );
+      },
+    );
+    if (days == null || days <= 0) return;
+    final base = item.expiresAt ?? item.bestBy ?? DateTime.now();
+    final newDate = base.add(Duration(days: days));
+    final updated = (item.expiresAt != null) ? item.copyWith(expiresAt: newDate) : item.copyWith(bestBy: newDate);
+    await ref.read(pantryExpiryServiceProvider).upsert(updated);
+    ref.invalidate(pantryItemsProvider);
+  }
+
+  Future<double?> _pickQty(BuildContext ctx, {required double max, double? initial}) async {
+    return showDialog<double?>(
+      context: ctx,
+      builder: (dctx) {
+        final ctrl = TextEditingController(text: _fmtQty(initial ?? max));
+        return AlertDialog(
+          title: const Text('Quantity'),
+          content: TextField(
+            controller: ctrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dctx).pop(), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.of(dctx).pop(double.tryParse(ctrl.text)), child: const Text('OK')),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.label, this.color});
+  final String label;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) {
+    final bg = color ?? Theme.of(context).colorScheme.tertiary;
+    final on = Theme.of(context).colorScheme.onTertiary;
+    return Container(
+      margin: const EdgeInsets.only(right: 6, top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+      child: Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: on)),
+    );
+  }
+}
+
+class _EmptyView extends StatelessWidget {
+  const _EmptyView();
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.kitchen, size: 56),
+            const SizedBox(height: 8),
+            Text('No pantry items', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text('Add items to track expiry and reduce waste', style: Theme.of(context).textTheme.bodyMedium),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
