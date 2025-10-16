@@ -17,6 +17,8 @@ import '../pages/batch/batch_hub_page.dart';
 import '../pages/batch/batch_session_details_page.dart';
 import '../providers/database_providers.dart';
 import '../pages/periodization/phase_planner_page.dart';
+import '../pages/multiweek/multiweek_hub_page.dart';
+import '../pages/multiweek/multiweek_series_page.dart';
 
 /// SharedPreferences flag for onboarding completion (v1)
 const kOnboardingDone = 'onboarding.done.v1';
@@ -44,6 +46,8 @@ class AppRouter {
   static const String onboarding = '/onboarding';
   static const String home = '/';
   static const String plan = '/plan';
+  static const String multiweek = '/multiweek';
+  static const String multiweekSeries = '/multiweek/:id';
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
   static const String settings = '/settings';
@@ -77,7 +81,24 @@ class AppRouter {
       name: 'plan',
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
-        child: const PlanPage(),
+        // Allow optional planId via query param: /plan?id=...
+        child: PlanPage(planId: state.uri.queryParameters['id']),
+      ),
+    ),
+    GoRoute(
+      path: multiweek,
+      name: 'multiweek',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const MultiweekHubPage(),
+      ),
+    ),
+    GoRoute(
+      path: multiweekSeries,
+      name: 'multiweek-series',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: MultiweekSeriesPage(seriesId: state.pathParameters['id']!),
       ),
     ),
     GoRoute(

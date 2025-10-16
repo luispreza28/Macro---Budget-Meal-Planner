@@ -40,12 +40,10 @@ import '../../../domain/services/leftovers_overlay_service.dart';
 import '../../../domain/services/leftovers_inventory_service.dart';
 import '../../../domain/services/leftovers_scheduler_service.dart';
 import '../../providers/pantry_expiry_providers.dart';
-import '../../providers/multiweek_providers.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
-  final String? planId;
-  const PlanPage({super.key, this.planId});
+  const PlanPage({super.key});
 
   @override
   ConsumerState<PlanPage> createState() => _PlanPageState();
@@ -125,9 +123,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
 
   @override
   Widget build(BuildContext context) {
-    final currentPlanAsync = widget.planId == null
-        ? ref.watch(currentPlanProvider)
-        : ref.watch(planByIdProvider(widget.planId!));
+    final currentPlanAsync = ref.watch(currentPlanProvider);
     final decoratedTargetsAsync = ref.watch(decoratedUserTargetsProvider);
     final recipesAsync = ref.watch(allRecipesProvider);
     final ingredientsAsync = ref.watch(allIngredientsProvider); // <— NEW
@@ -179,16 +175,6 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 ),
               ),
               PopupMenuItem(
-                value: 'multiweek',
-                child: Row(
-                  children: [
-                    Icon(Icons.view_week_outlined),
-                    SizedBox(width: 8),
-                    Text('Multi-Week Planning'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
                 value: 'export',
                 child: Row(
                   children: [
@@ -206,9 +192,6 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                   break;
                 case 'taste':
                   context.go(AppRouter.tasteSettings);
-                  break;
-                case 'multiweek':
-                  context.go(AppRouter.multiweek);
                   break;
                 case 'export':
                   final plan = currentPlanAsync.asData?.value;
@@ -299,47 +282,6 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
                                 showBudget: decorated.base.budgetCents != null,
-                              ),
-
-                              // Week navigator if part of a series
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                                child: Consumer(builder: (context, ref, _) {
-                                  final asyncSeries = ref.watch(seriesForPlanIdProvider(plan.id));
-                                  return asyncSeries.when(
-                                    loading: () => const SizedBox.shrink(),
-                                    error: (_, __) => const SizedBox.shrink(),
-                                    data: (info) {
-                                      if (info == null) return const SizedBox.shrink();
-                                      final s = info.series;
-                                      final idx = info.index;
-                                      return Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          IconButton(
-                                            icon: const Icon(Icons.chevron_left),
-                                            onPressed: idx > 0
-                                                ? () {
-                                                    final prevId = s.planIds[idx - 1];
-                                                    context.push('${AppRouter.plan}?id=$prevId');
-                                                  }
-                                                : null,
-                                          ),
-                                          Text('Week ${idx + 1} / ${s.weeks}'),
-                                          IconButton(
-                                            icon: const Icon(Icons.chevron_right),
-                                            onPressed: idx < s.weeks - 1
-                                                ? () {
-                                                    final nextId = s.planIds[idx + 1];
-                                                    context.push('${AppRouter.plan}?id=$nextId');
-                                                  }
-                                                : null,
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                }),
                               ),
 
                               // Use soon nudge
@@ -1620,5 +1562,6 @@ String _aisleName(ing.Aisle aisle) {
       return 'Household';
   }
 }
+
 
 
