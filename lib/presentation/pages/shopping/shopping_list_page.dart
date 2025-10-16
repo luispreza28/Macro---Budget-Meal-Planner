@@ -16,6 +16,12 @@ import '../../../domain/services/store_profile_service.dart';
 import '../../../domain/services/trip_cost_service.dart';
 import 'package:intl/intl.dart';
 import '../../providers/store_compare_providers.dart';
+import '../../providers/plan_providers.dart';
+import '../../providers/store_providers.dart';
+import '../../providers/shopping_list_providers.dart';
+import '../../providers/database_providers.dart';
+import '../../../domain/services/route_prefs_service.dart';
+import '../../providers/route_providers.dart';
 import '../../../domain/value/shortfall_item.dart' as v1;
 import '../../providers/pantry_providers.dart';
 import '../../../domain/services/substitutions_service.dart';
@@ -41,6 +47,9 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
   // Track which plan's checked state is currently loaded.
   String? _loadedPlanId;
   late final ProviderSubscription<AsyncValue<dynamic>> _planListener;
+  final ScrollController _scrollController = ScrollController();
+  final Map<String, GlobalKey> _sectionKeys = {};
+  int _lastAisleIndex = -1;
   @override
   void initState() {
     super.initState();
@@ -90,6 +99,28 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
           tooltip: 'Back',
         ),
         actions: [
+          Builder(builder: (context) {
+            final planId = ref.watch(currentPlanProvider).asData?.value?.id;
+            if (planId == null) return const SizedBox.shrink();
+            final mode = ref.watch(instoreModeProvider(planId)).value ?? 'normal';
+            if (mode != 'instore') return const SizedBox.shrink();
+            return PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (v) async {
+                final allKeys = ing.Aisle.values.map((a) => a.value).toSet();
+                if (v == 'collapse') {
+                  await ref.read(routePrefsServiceProvider).setCollapsed(planId, allKeys);
+                } else if (v == 'expand') {
+                  await ref.read(routePrefsServiceProvider).setCollapsed(planId, <String>{});
+                }
+                ref.invalidate(collapsedSectionsProvider(planId));
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem<String>(value: 'collapse', child: Text('Collapse all')),
+                PopupMenuItem<String>(value: 'expand', child: Text('Expand all')),
+              ],
+            );
+          }),
           IconButton(
             tooltip: 'Export (copy to clipboard)',
             onPressed: groupedData.isEmpty
@@ -129,6 +160,25 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
           }
           sortedGroups.sort((a, b) => idxOf(a.aisle).compareTo(idxOf(b.aisle)));
 
+          final plan = ref.read(currentPlanProvider).asData?.value;
+          final planId = plan?.id;
+          final mode = planId != null ? ref.watch(instoreModeProvider(planId)).value ?? 'normal' : 'normal';
+          final isInstore = mode == 'instore';
+          final uncheckedOnly = planId != null ? (ref.watch(showUncheckedOnlyProvider(planId)).value ?? false) : false;
+          final collapsed = planId != null ? (ref.watch(collapsedSectionsProvider(planId)).value ?? <String>{}) : <String>{};
+
+          // Apply unchecked-only filter (after grouping/ordering)
+          List<ShoppingAisleGroup> visibleGroups = sortedGroups;
+          if (isInstore && uncheckedOnly) {
+            visibleGroups = [];
+            for (final g in sortedGroups) {
+              final filtered = g.items.where((it) => !_isCheckedItem(it)).toList();
+              if (filtered.isNotEmpty) {
+                visibleGroups.add(ShoppingAisleGroup(aisle: g.aisle, items: filtered));
+              }
+            }
+          }
+
           if (grouped.isEmpty) {
             final debug = ref
                 .watch(shoppingListDebugProvider)
@@ -152,6 +202,16 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                 ),
               )
               .toList();
+
+          // Build header controls (mode toggle, unchecked-only, hint)
+          final storeName = store?.name ?? 'Default';
+          final routeHint = 'Route ordered for $storeName';
+
+          // Ensure keys for headers
+          _sectionKeys.clear();
+          for (final g in visibleGroups) {
+            _sectionKeys.putIfAbsent(g.aisle.value, () => GlobalKey());
+          }
 
           return Column(
             children: [
@@ -274,29 +334,270 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                 child: _TripTotalBar(groups: sortedGroups, checked: _checked, store: storeAsync.value),
               ),
               const SizedBox(height: 8),
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  itemCount: sortedGroups.length,
-                  itemBuilder: (context, sectionIndex) {
-                    final group = sortedGroups[sectionIndex];
-                    final title = _aisleDisplayName(group.aisle);
-                    final items = group.items;
-
-                    return _AisleSection(
-                      title: title,
-                      items: items,
-                      isChecked: _isCheckedItem,
-                      toggleChecked: _toggleCheckedItem,
-                      planId: ref.read(currentPlanProvider).asData?.value?.id,
-                    );
-                  },
+              // In-Store Mode controls
+              if (planId != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Row(
+                    children: [
+                      Switch.adaptive(
+                        value: isInstore,
+                        onChanged: (v) async {
+                          await ref.read(routePrefsServiceProvider).setMode(planId, v ? 'instore' : 'normal');
+                          ref.invalidate(instoreModeProvider(planId));
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('In-Store Mode'),
+                      const Spacer(),
+                      if (isInstore)
+                        Row(
+                          children: [
+                            Checkbox.adaptive(
+                              value: uncheckedOnly,
+                              onChanged: (v) async {
+                                await ref.read(routePrefsServiceProvider).setUncheckedOnly(planId, v ?? false);
+                                ref.invalidate(showUncheckedOnlyProvider(planId));
+                              },
+                            ),
+                            const Text('Show unchecked only'),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
+              if (isInstore)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      routeHint,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: isInstore
+                    ? CustomScrollView(
+                        controller: _scrollController,
+                        slivers: [
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                            sliver: SliverList(
+                              delegate: SliverChildListDelegate([
+                                // Keep existing summary/header cards in flow already above
+                              ]),
+                            ),
+                          ),
+                          ...visibleGroups.expand((g) {
+                            final headerKey = _sectionKeys[g.aisle.value]!;
+                            final isCollapsed = collapsed.contains(g.aisle.value);
+                            return [
+                              SliverPersistentHeader(
+                                pinned: true,
+                                delegate: _SimpleHeaderDelegate(
+                                  minExtent: 44,
+                                  maxExtent: 48,
+                                  child: Container(
+                                    key: headerKey,
+                                    color: Theme.of(context).colorScheme.surface,
+                                    padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: GestureDetector(
+                                            onTap: () async {
+                                              if (planId == null) return;
+                                              final next = {...collapsed};
+                                              if (isCollapsed) {
+                                                next.remove(g.aisle.value);
+                                              } else {
+                                                next.add(g.aisle.value);
+                                              }
+                                              await ref.read(routePrefsServiceProvider).setCollapsed(planId, next);
+                                              ref.invalidate(collapsedSectionsProvider(planId));
+                                            },
+                                            child: Row(
+                                              children: [
+                                                Text(
+                                                  _aisleDisplayName(g.aisle),
+                                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                                        fontWeight: FontWeight.w800,
+                                                        color: Theme.of(context).colorScheme.primary,
+                                                        letterSpacing: 0.2,
+                                                      ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  '• ${g.items.length} items',
+                                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                      ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        Icon(isCollapsed ? Icons.expand_more : Icons.expand_less),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (!isCollapsed)
+                                SliverToBoxAdapter(
+                                  child: Card(
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: ListView.separated(
+                                      shrinkWrap: true,
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      itemCount: g.items.length,
+                                      separatorBuilder: (_, __) => const Divider(height: 1),
+                                      itemBuilder: (context, i) {
+                                        final it = g.items[i];
+                                        final name = it.ingredient.name;
+                                        final qtyStr = _formatQty(it.totalQty, it.unit);
+                                        final checked = _isCheckedItem(it);
+                                        final lineId = '${it.ingredient.id}|${it.unit.name}';
+                                        return ListTile(
+                                          minVerticalPadding: 12,
+                                          leading: Transform.scale(
+                                            scale: 1.2,
+                                            child: Checkbox.adaptive(
+                                              value: checked,
+                                              onChanged: (_) => _toggleCheckedItem(it),
+                                            ),
+                                          ),
+                                          title: Text(
+                                            name,
+                                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                                  decoration: checked ? TextDecoration.lineThrough : null,
+                                                  color: checked ? Theme.of(context).colorScheme.onSurfaceVariant : null,
+                                                ),
+                                          ),
+                                          subtitle: it.packsNeeded != null
+                                              ? Text(
+                                                  '${it.packsNeeded} pack(s) suggested',
+                                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                      ),
+                                                )
+                                              : null,
+                                          trailing: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              Text(
+                                                qtyStr,
+                                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                              ),
+                                              if (planId != null) _SplitStoreBadge(planId: planId, lineId: lineId),
+                                              if (it.estimatedCostCents > 0)
+                                                Text(
+                                                  '\$${(it.estimatedCostCents / 100).toStringAsFixed(2)}',
+                                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                      ),
+                                                ),
+                                            ],
+                                          ),
+                                          onTap: () => _toggleCheckedItem(it),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                            ];
+                          }),
+                        ],
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        itemCount: sortedGroups.length,
+                        itemBuilder: (context, sectionIndex) {
+                          final group = sortedGroups[sectionIndex];
+                          final title = _aisleDisplayName(group.aisle);
+                          final items = group.items;
+
+                          return _AisleSection(
+                            title: title,
+                            items: items,
+                            isChecked: _isCheckedItem,
+                            toggleChecked: _toggleCheckedItem,
+                            planId: ref.read(currentPlanProvider).asData?.value?.id,
+                          );
+                        },
+                      ),
               ),
             ],
           );
         },
       ),
+      floatingActionButton: () {
+        final pid = ref.watch(currentPlanProvider).asData?.value?.id;
+        if (pid == null) return null;
+        final inMode = ref.watch(instoreModeProvider(pid)).value ?? 'normal';
+        if (inMode != 'instore') return null;
+        return FloatingActionButton(
+          onPressed: () async {
+            final plan = ref.read(currentPlanProvider).asData?.value;
+            final planId = plan?.id;
+            if (planId == null) return;
+            final uncheckedOnly = ref.read(showUncheckedOnlyProvider(planId)).value ?? false;
+            // Build current groups view
+            final groups = (ref.read(shoppingListItemsProvider).asData?.value ?? const <ShoppingAisleGroup>[]);
+            final store = ref.read(selectedStoreProvider).value;
+            final defaultOrder = ing.Aisle.values.map((a) => a.value).toList();
+            final order = store?.aisleOrder ?? defaultOrder;
+            List<ShoppingAisleGroup> sorted = [...groups]
+              ..sort((a, b) => (order.indexOf(a.aisle.value)).compareTo(order.indexOf(b.aisle.value)));
+            if (uncheckedOnly) {
+              sorted = sorted
+                  .map((g) => ShoppingAisleGroup(
+                      aisle: g.aisle, items: g.items.where((it) => !_isCheckedItem(it)).toList()))
+                  .where((g) => g.items.isNotEmpty)
+                  .toList();
+            }
+            if (sorted.isEmpty) return;
+            // Find next aisle with any unchecked
+            int start = _lastAisleIndex;
+            int next = -1;
+            for (int i = 0; i < sorted.length; i++) {
+              final idx = (start + 1 + i) % sorted.length;
+              final hasUnchecked = sorted[idx].items.any((it) => !_isCheckedItem(it));
+              if (hasUnchecked) {
+                next = idx;
+                break;
+              }
+            }
+            if (next == -1) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All done')));
+              }
+              return;
+            }
+            _lastAisleIndex = next;
+            final key = _sectionKeys[sorted[next].aisle.value];
+            if (key?.currentContext != null) {
+              await Scrollable.ensureVisible(
+                key!.currentContext!,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeInOut,
+              );
+            }
+          },
+          child: const Icon(Icons.arrow_downward),
+        );
+      }(),
     );
   }
 
@@ -1192,3 +1493,22 @@ String _aisleDisplayName(ing.Aisle aisle) {
   }
 }
 
+class _SimpleHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _SimpleHeaderDelegate({required this.minExtent, required this.maxExtent, required this.child});
+
+  @override
+  final double minExtent;
+  @override
+  final double maxExtent;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return child;
+  }
+
+  @override
+  bool shouldRebuild(covariant _SimpleHeaderDelegate oldDelegate) {
+    return oldDelegate.maxExtent != maxExtent || oldDelegate.minExtent != minExtent || oldDelegate.child != child;
+  }
+}
