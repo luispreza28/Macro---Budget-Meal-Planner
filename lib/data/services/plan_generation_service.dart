@@ -9,6 +9,7 @@ import '../../domain/entities/plan.dart';
 import '../../domain/entities/recipe.dart';
 import '../../domain/entities/user_targets.dart';
 import '../../domain/services/recipe_features.dart';
+import '../../presentation/providers/taste_providers.dart';
 import '../../domain/services/variety_options.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
@@ -37,11 +38,26 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
 
     final ingById = ingredientsById ?? {for (final i in ingredients) i.id: i};
 
+    // Taste overlay (optional if ref is available)
+    final rules = _ref == null ? null : await _ref!.read(tasteRulesProvider.future).catchError((_) => null);
+
     final int mealsPerDay = targets.mealsPerDay.clamp(1, 6) as int;
     final rng = _rng;
     // Exclude recipes if requested
     final excluded = excludedRecipeIds ?? const <String>{};
-    final all = [...recipes.where((r) => !excluded.contains(r.id))];
+    var all = [...recipes.where((r) => !excluded.contains(r.id))];
+
+    // Apply taste hard bans unless explicitly allowed
+    if (rules != null) {
+      all = all.where((r) {
+        if (rules.allowRecipes.contains(r.id)) return true;
+        final banned = recipeHardBanned(recipe: r, rules: rules, ingById: ingById);
+        if (banned && kDebugMode) {
+          debugPrint('[Taste][filter] drop ${r.name} (${r.id})');
+        }
+        return !banned;
+      }).toList(growable: false);
+    }
     final itemized = all.where((r) => r.items.isNotEmpty).toList();
     final nonItemized = all.where((r) => r.items.isEmpty).toList();
 
@@ -115,6 +131,14 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
         if (fb > 0) {
           final isFav = favs.contains(r.id) ? 1.0 : 0.0;
           score += fb * isFav;
+        }
+        // Taste score (conservative weight)
+        if (rules != null) {
+          final taste = tasteScore(recipe: r, rules: rules, ingById: ingById);
+          score += 0.5 * taste; // tuned small; variety/macros still dominate
+          if (kDebugMode) {
+            debugPrint('[Taste][score] ${r.name} t=${taste.toStringAsFixed(2)}');
+          }
         }
         baseScores[r.id] = score;
       }

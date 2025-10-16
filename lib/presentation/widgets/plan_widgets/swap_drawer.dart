@@ -6,6 +6,7 @@ import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_features.dart';
 import '../../../domain/services/pantry_utilization_service.dart';
 import '../../providers/ingredient_providers.dart';
+import '../../providers/taste_providers.dart';
 import '../../../domain/services/variety_prefs_service.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/substitution_providers.dart';
@@ -83,6 +84,7 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
   Widget build(BuildContext context) {
     final alternatives = widget.alternatives;
     final allRecipesAsync = ref.watch(allRecipesProvider);
+    final tasteRulesAsync = ref.watch(tasteRulesProvider);
     final subsAsync = ref.watch(
       substitutionScoresProvider((
         currentRecipeId: widget.currentRecipe.id,
@@ -252,11 +254,22 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: [
+                const SizedBox(height: 8),
+                // Taste badges (optional)
+                if (tasteRulesAsync.asData?.value != null) ...[
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: _tasteReasons(r, tasteRulesAsync.asData!.value)
+                        .map((e) => _ReasonBadge(reason: e))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
                             _ImpactChip(
                               label: '${pantryPct >= 0 ? '+' : ''}${pantryPct.toStringAsFixed(0)}% pantry',
                               isPositive: s.pantryGain > 0,
@@ -293,6 +306,8 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
           final option = toShow[index];
           final isFav = favs.contains(option.recipe.id);
           final util = _utilCache[option.recipe.id];
+          final rules = tasteRulesAsync.asData?.value;
+          final extra = rules == null ? const <SwapReason>[] : _tasteReasons(option.recipe, rules);
           return _SwapOptionCard(
             option: option,
             isFavorite: isFav,
@@ -300,6 +315,7 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
               widget.onSwapSelected(option.recipe);
               widget.onClose();
             },
+            reasonsOverride: [...option.reasons, ...extra],
           );
         },
       );
@@ -404,17 +420,49 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
       ),
     );
   }
+
+  List<SwapReason> _tasteReasons(Recipe r, TasteRules rules) {
+    final out = <SwapReason>[];
+    final hasBannedTag = r.dietFlags.any((t) => rules.hardBanTags.contains(t));
+    final hasBannedIng = r.items.any((it) => rules.hardBanIng.contains(it.ingredientId));
+    if (rules.allowRecipes.contains(r.id) && (hasBannedTag || hasBannedIng)) {
+      out.add(const SwapReason(type: SwapReasonType.allowedAllergen, description: 'Allowed (allergen)'));
+    }
+    final likeCuisine = r.dietFlags.firstWhere(
+      (t) => rules.likeTags.contains(t),
+      orElse: () => '',
+    );
+    if (likeCuisine.isNotEmpty) {
+      out.add(SwapReason(type: SwapReasonType.tasteCuisine, description: 'Match: $likeCuisine'));
+    }
+    final hasFavIng = r.items.any((it) => rules.likeIng.contains(it.ingredientId));
+    if (hasFavIng) {
+      out.add(const SwapReason(type: SwapReasonType.tasteIngredient, description: 'Fav ingredient'));
+    }
+    final dislikeCuisine = r.dietFlags.firstWhere(
+      (t) => rules.dislikeTags.contains(t),
+      orElse: () => '',
+    );
+    if (dislikeCuisine.isNotEmpty) {
+      out.add(SwapReason(type: SwapReasonType.tasteDislike, description: 'You dislike $dislikeCuisine'));
+    }
+    final hasDislikedIng = r.items.any((it) => rules.dislikeIng.contains(it.ingredientId));
+    if (hasDislikedIng) {
+      out.add(const SwapReason(type: SwapReasonType.tasteDislike, description: 'Contains disliked'));
+    }
+    return out;
+  }
 }
 
 class _SwapOptionCard extends StatelessWidget {
-  final PantryUtilization? pantryUtil;
 
-  const _SwapOptionCard({required this.option, required this.onTap, this.isFavorite = false, this.pantryUtil});
+  const _SwapOptionCard({required this.option, required this.onTap, this.isFavorite = false, this.pantryUtil, this.reasonsOverride});
 
   final SwapOption option;
   final VoidCallback onTap;
   final bool isFavorite;
   final PantryUtilization? pantryUtil;
+  final List<SwapReason>? reasonsOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -458,9 +506,9 @@ class _SwapOptionCard extends StatelessWidget {
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
-                children: option.reasons.map((reason) {
-                  return _ReasonBadge(reason: reason);
-                }).toList(),
+                children: (reasonsOverride ?? option.reasons)
+                    .map((reason) => _ReasonBadge(reason: reason))
+                    .toList(),
               ),
 
               const SizedBox(height: 12),
@@ -564,6 +612,26 @@ class _ReasonBadge extends StatelessWidget {
         textColor = Colors.teal;
         icon = Icons.ac_unit;
         break;
+      case SwapReasonType.tasteCuisine:
+        backgroundColor = Colors.indigo.withOpacity(0.1);
+        textColor = Colors.indigo;
+        icon = Icons.local_dining;
+        break;
+      case SwapReasonType.tasteIngredient:
+        backgroundColor = Colors.indigo.withOpacity(0.1);
+        textColor = Colors.indigo;
+        icon = Icons.restaurant;
+        break;
+      case SwapReasonType.tasteDislike:
+        backgroundColor = Colors.brown.withOpacity(0.1);
+        textColor = Colors.brown;
+        icon = Icons.thumb_down_alt_outlined;
+        break;
+      case SwapReasonType.allowedAllergen:
+        backgroundColor = Colors.amber.withOpacity(0.2);
+        textColor = Colors.amber.shade900;
+        icon = Icons.warning_amber_rounded;
+        break;
     }
 
     return Container(
@@ -666,9 +734,14 @@ enum SwapReasonType {
   betterMacros,
   higherCalories,
   lowerCalories,
+  tasteCuisine,
+  tasteIngredient,
+  tasteDislike,
+  allowedAllergen,
 }
 
 void _noRecipe(Recipe _) {}
+
 
 
 

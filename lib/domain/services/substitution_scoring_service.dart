@@ -13,6 +13,7 @@ import '../services/variety_prefs_service.dart';
 import '../services/recipe_prefs_service.dart';
 import '../../presentation/providers/ingredient_providers.dart';
 import '../../presentation/providers/user_targets_providers.dart';
+import '../../presentation/providers/taste_providers.dart';
 
 final substitutionScoringServiceProvider =
     Provider<SubstitutionScoringService>(
@@ -63,6 +64,18 @@ class SubstitutionScoringService {
         ing.id: ing
     };
 
+    // Taste rules (optional)
+    final rules = await ref.watch(tasteRulesProvider.future).catchError((_) => null);
+
+    // Apply taste-based filtering (respect explicit allows)
+    final filteredCandidates = (rules == null)
+        ? candidates
+        : candidates.where((r) {
+            if (rules.allowRecipes.contains(r.id)) return true;
+            final banned = recipeHardBanned(recipe: r, rules: rules, ingById: ingMap!);
+            return !banned;
+          }).toList(growable: false);
+
     // Pantry coverage for current
     final currentUtil = await pantrySvc.scoreRecipePantryUse(
       current,
@@ -73,7 +86,7 @@ class SubstitutionScoringService {
     final enableCuisineRotation = await varietySvc.enableCuisineRotation();
 
     final results = <SubstitutionScore>[];
-    for (final cand in candidates) {
+    for (final cand in filteredCandidates) {
       // Pantry delta
       final candUtil = await pantrySvc.scoreRecipePantryUse(
         cand,
@@ -115,6 +128,13 @@ class SubstitutionScoringService {
       // Composite
       double composite =
           _wPantry * pantryGain + _wBudget * budgetGain + _wMacro * macroGain;
+
+      // Taste boost (normalized, small weight)
+      if (rules != null) {
+        final t = tasteScore(recipe: cand, rules: rules, ingById: ingMap!);
+        final tNorm = ((t + 10.0) / 20.0).clamp(0.0, 1.0);
+        composite += 0.15 * tNorm;
+      }
 
       // Nudges
       if (isFavoriteSet.contains(cand.id)) {
@@ -187,4 +207,3 @@ class SubstitutionScoringService {
   double _clamp(num v, num lo, num hi) => v.clamp(lo, hi).toDouble();
   String _fmt(num v) => v.toStringAsFixed(3);
 }
-

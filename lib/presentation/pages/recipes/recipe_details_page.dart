@@ -22,6 +22,8 @@ import '../../../domain/services/substitutions_service.dart';
 import '../../../domain/services/substitution_math.dart';
 import '../../../domain/services/substitution_cost_service.dart';
 import '../../providers/pantry_providers.dart';
+import '../../providers/taste_providers.dart';
+import '../../../domain/services/taste_profile_service.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});
@@ -1259,6 +1261,118 @@ class _Header extends ConsumerWidget {
                     .toList(),
               ),
             ],
+            // Taste & allergen cues
+            Consumer(builder: (context, ref, _) {
+              final rulesAsync = ref.watch(tasteRulesProvider);
+              final rules = rulesAsync.asData?.value;
+              if (rules == null) return const SizedBox.shrink();
+              final bannedTag = recipe.dietFlags.any((t) => rules.hardBanTags.contains(t));
+              final bannedIng = recipe.items.any((it) => rules.hardBanIng.contains(it.ingredientId));
+              final isAllowed = rules.allowRecipes.contains(recipe.id);
+              final isBanned = (bannedTag || bannedIng) && !isAllowed;
+              final dislikedTag = recipe.dietFlags.firstWhere((t) => rules.dislikeTags.contains(t), orElse: () => '');
+              final dislikedIng = recipe.items.any((it) => rules.dislikeIng.contains(it.ingredientId));
+
+              if (!isBanned && !(dislikedIng || dislikedTag.isNotEmpty)) return const SizedBox.shrink();
+
+              return Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (isBanned)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 16, color: Theme.of(context).colorScheme.onErrorContainer),
+                            const SizedBox(width: 6),
+                            Text('Allergen / HARD BAN', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: Theme.of(context).colorScheme.onErrorContainer)),
+                            const SizedBox(width: 10),
+                            TextButton(
+                              onPressed: () async {
+                                final svc = ref.read(tasteProfileServiceProvider);
+                                final cur = await ref.read(tasteProfileProvider.future);
+                                final next = cur.copyWith(
+                                  perRecipeAllow: {...cur.perRecipeAllow, recipe.id: true},
+                                );
+                                await svc.save(next);
+                                ref.invalidate(tasteProfileProvider);
+                                ref.invalidate(tasteRulesProvider);
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Allowed for you')));
+                              },
+                              child: const Text('Allow for me'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    if (!isBanned && (dislikedIng || dislikedTag.isNotEmpty))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.info_outline, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              dislikedTag.isNotEmpty ? 'You dislike $dislikedTag' : 'Contains disliked',
+                              style: Theme.of(context).textTheme.labelMedium,
+                            ),
+                            const SizedBox(width: 10),
+                            TextButton(
+                              onPressed: () async {
+                                final svc = ref.read(tasteProfileServiceProvider);
+                                final cur = await ref.read(tasteProfileProvider.future);
+                                final next = cur.copyWith(
+                                  perRecipeHide: {...cur.perRecipeHide, recipe.id: true},
+                                );
+                                await svc.save(next);
+                                ref.invalidate(tasteProfileProvider);
+                                ref.invalidate(tasteRulesProvider);
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hidden from suggestions')));
+                              },
+                              child: const Text('Hide'),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final svc = ref.read(tasteProfileServiceProvider);
+                                final cur = await ref.read(tasteProfileProvider.future);
+                                final newDislikeTags = List<String>.from(cur.dislikeTags);
+                                if (dislikedTag.isNotEmpty) {
+                                  newDislikeTags.removeWhere((t) => t == dislikedTag);
+                                }
+                                final newDislikeIng = List<String>.from(cur.dislikeIngredients);
+                                for (final it in recipe.items) {
+                                  newDislikeIng.removeWhere((id) => id == it.ingredientId);
+                                }
+                                final next = cur.copyWith(
+                                  dislikeTags: newDislikeTags,
+                                  dislikeIngredients: newDislikeIng,
+                                );
+                                await svc.save(next);
+                                ref.invalidate(tasteProfileProvider);
+                                ref.invalidate(tasteRulesProvider);
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Removed dislike')));
+                              },
+                              child: const Text('Remove dislike'),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }),
           ],
         ),
       ),

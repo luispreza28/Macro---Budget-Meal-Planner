@@ -136,6 +136,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 16),
 
+          // Taste & Allergens
+          _buildSectionHeader('Taste & Allergens'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.local_dining_outlined),
+                  title: const Text('Taste & Allergens'),
+                  subtitle: const Text('Likes, dislikes, bans, cuisines'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push(AppRouter.tasteSettings),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Shopping section
           _buildSectionHeader('Shopping'),
           Card(

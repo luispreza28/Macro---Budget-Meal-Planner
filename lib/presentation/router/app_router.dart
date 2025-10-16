@@ -9,6 +9,7 @@ import '../pages/plan/plan_page.dart';
 import '../pages/shopping/shopping_list_page.dart';
 import '../pages/pantry/pantry_page.dart';
 import '../pages/settings/settings_page.dart';
+import '../pages/settings/taste_profile_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
 import '../pages/import/import_recipe_page.dart';
@@ -46,6 +47,7 @@ class AppRouter {
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
   static const String settings = '/settings';
+  static const String tasteSettings = '/settings/taste';
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
   static const String importRecipe = '/import';
@@ -100,6 +102,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const SettingsPage(),
+      ),
+    ),
+    GoRoute(
+      path: tasteSettings,
+      name: 'settings-taste',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const TasteProfilePage(),
       ),
     ),
     GoRoute(

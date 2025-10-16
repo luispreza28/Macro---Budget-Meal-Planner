@@ -165,6 +165,16 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 ),
               ),
               PopupMenuItem(
+                value: 'taste',
+                child: Row(
+                  children: [
+                    Icon(Icons.local_dining_outlined),
+                    SizedBox(width: 8),
+                    Text('Taste & Allergens'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
                 value: 'export',
                 child: Row(
                   children: [
@@ -179,6 +189,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
               switch (value) {
                 case 'settings':
                   context.go(AppRouter.settings);
+                  break;
+                case 'taste':
+                  context.go(AppRouter.tasteSettings);
                   break;
                 case 'export':
                   final plan = currentPlanAsync.asData?.value;
