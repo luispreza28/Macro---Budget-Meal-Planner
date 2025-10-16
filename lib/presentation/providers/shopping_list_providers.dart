@@ -6,6 +6,7 @@ import '../providers/database_providers.dart';
 import '../providers/plan_providers.dart';
 import '../providers/recipe_providers.dart';
 import '../providers/ingredient_providers.dart';
+import '../providers/sub_rules_providers.dart';
 import 'dart:convert';
 
 class AggregatedShoppingItem {
@@ -70,19 +71,43 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
       if (recipe == null || recipe.items.isEmpty) continue;
 
       for (final item in recipe.items) {
-        final ingMeta = ingredientById[item.ingredientId];
-        if (ingMeta == null) continue;
+        final srcIng = ingredientById[item.ingredientId];
+        if (srcIng == null) continue;
 
-        // Convert plan-derived items into ingredient base unit for consistency.
+        // Convert plan-derived items into source ingredient base unit for consistency.
         final qtyInBase = _toIngredientUnit(
           qty: item.qty * meal.servings,
           from: item.unit,
-          to: ingMeta.unit,
+          to: srcIng.unit,
         );
 
-        final byUnit = totals.putIfAbsent(item.ingredientId, () => {});
-        byUnit.update(ingMeta.unit, (v) => v + qtyInBase,
-            ifAbsent: () => qtyInBase);
+        // Apply global (scope-less) ALWAYS remap: map A -> B when applicable.
+        // For shopping we conservatively apply only rules without scope tags.
+        String targetId = item.ingredientId;
+        try {
+          // use empty tag scope => only rules with empty scopeTags apply.
+          final mappedId = await mapAlwaysIngredient(
+            ref: ref,
+            ing: srcIng,
+            recipeTags: <String>{},
+          );
+          targetId = mappedId;
+        } catch (_) {
+          targetId = item.ingredientId;
+        }
+
+        // If remapped, ensure base units are compatible; otherwise skip remap.
+        final targetIng = ingredientById[targetId] ?? srcIng;
+        if (targetId != item.ingredientId && targetIng.unit != srcIng.unit) {
+          // Units differ (e.g., g vs ml). To avoid invalid merges without density, skip remap.
+          // Keep under original ingredient id.
+          final byUnit = totals.putIfAbsent(item.ingredientId, () => {});
+          byUnit.update(srcIng.unit, (v) => v + qtyInBase, ifAbsent: () => qtyInBase);
+          continue;
+        }
+
+        final byUnit = totals.putIfAbsent(targetId, () => {});
+        byUnit.update(targetIng.unit, (v) => v + qtyInBase, ifAbsent: () => qtyInBase);
       }
     }
   }

@@ -14,6 +14,7 @@ import '../services/recipe_prefs_service.dart';
 import '../../presentation/providers/ingredient_providers.dart';
 import '../../presentation/providers/user_targets_providers.dart';
 import '../../presentation/providers/taste_providers.dart';
+import '../../presentation/providers/sub_rules_providers.dart';
 
 final substitutionScoringServiceProvider =
     Provider<SubstitutionScoringService>(
@@ -68,13 +69,31 @@ class SubstitutionScoringService {
     final rules = await ref.watch(tasteRulesProvider.future).catchError((_) => null);
 
     // Apply taste-based filtering (respect explicit allows)
-    final filteredCandidates = (rules == null)
+    // Taste-based filtering (respect explicit allows)
+    var filteredCandidates = (rules == null)
         ? candidates
         : candidates.where((r) {
             if (rules.allowRecipes.contains(r.id)) return true;
             final banned = recipeHardBanned(recipe: r, rules: rules, ingById: ingMap!);
             return !banned;
           }).toList(growable: false);
+
+    // SubRules: hide candidates with NEVER ingredients under their own diet flags
+    try {
+      final idx = await ref.read(subRulesIndexProvider.future);
+      filteredCandidates = filteredCandidates.where((cand) {
+        if (cand.items.isEmpty) return true;
+        final tags = cand.dietFlags.toSet();
+        for (final it in cand.items) {
+          final ing = ingMap![it.ingredientId];
+          if (ing == null) continue;
+          for (final r in idx.matchingForIngredient(ing, tags)) {
+            if (r.action == SubAction.never) return false;
+          }
+        }
+        return true;
+      }).toList(growable: false);
+    } catch (_) {}
 
     // Pantry coverage for current
     final currentUtil = await pantrySvc.scoreRecipePantryUse(
@@ -86,6 +105,27 @@ class SubstitutionScoringService {
     final enableCuisineRotation = await varietySvc.enableCuisineRotation();
 
     final results = <SubstitutionScore>[];
+    // Precompute current FROM/ALWAYS/TO sets for prefer boosts
+    Set<String> currentItemIds = current.items.map((e) => e.ingredientId).toSet();
+    final currentTags = current.dietFlags.toSet();
+    List<(String from, String to)> alwaysPairs = [];
+    List<(String from, String? to)> preferPairs = [];
+    try {
+      final idx = await ref.read(subRulesIndexProvider.future);
+      for (final id in currentItemIds) {
+        final ing = ingMap![id];
+        if (ing == null) continue;
+        for (final r in idx.matchingForIngredient(ing, currentTags)) {
+          if (r.action == SubAction.always && r.to != null && r.to!.kind == 'ingredient') {
+            alwaysPairs.add((id, r.to!.value));
+          }
+          if (r.action == SubAction.prefer) {
+            preferPairs.add((id, r.to?.kind == 'ingredient' ? r.to!.value : null));
+          }
+        }
+      }
+    } catch (_) {}
+
     for (final cand in filteredCandidates) {
       // Pantry delta
       final candUtil = await pantrySvc.scoreRecipePantryUse(
@@ -147,7 +187,24 @@ class SubstitutionScoringService {
           composite -= _varietyPenalty;
         }
       }
-      composite = composite.clamp(0.0, 1.2);
+      // SubRules slight boosts:
+      try {
+        // If candidate contains any ALWAYS-to target from current FROM, nudge up
+        final candIds = cand.items.map((e) => e.ingredientId).toSet();
+        for (final pair in alwaysPairs) {
+          if (candIds.contains(pair.$2)) {
+            composite += 0.12; // small ordering nudge
+          }
+        }
+        // Prefer rules: if candidate includes the preferred TO, nudge slightly
+        for (final p in preferPairs) {
+          if (p.$2 != null && candIds.contains(p.$2)) {
+            composite += 0.10;
+          }
+        }
+      } catch (_) {}
+
+      composite = composite.clamp(0.0, 1.4);
 
       if (kDebugMode) {
         debugPrint(

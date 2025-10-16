@@ -10,6 +10,8 @@ import '../../domain/entities/recipe.dart';
 import '../../domain/entities/user_targets.dart';
 import '../../domain/services/recipe_features.dart';
 import '../../presentation/providers/taste_providers.dart';
+import '../../presentation/providers/sub_rules_providers.dart';
+import '../../presentation/providers/ingredient_providers.dart';
 import '../../domain/services/variety_options.dart';
 
 /// Generator that prefers real recipe.items to compute macros & cost.
@@ -46,6 +48,33 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
     // Exclude recipes if requested
     final excluded = excludedRecipeIds ?? const <String>{};
     var all = [...recipes.where((r) => !excluded.contains(r.id))];
+
+    // SubRules: prune recipes with "never" ingredients (unless explicitly allowed by Taste rules)
+    try {
+      final idx = _ref == null ? null : await _ref!.read(subRulesIndexProvider.future);
+      if (idx != null) {
+        all = all.where((r) {
+          if (rules != null && rules.allowRecipes.contains(r.id)) return true; // Explicit allow wins
+          if (r.items.isEmpty) return true; // nothing to check
+          for (final it in r.items) {
+            final ing = ingById[it.ingredientId];
+            if (ing == null) continue;
+            final recipeTags = r.dietFlags.toSet();
+            for (final rr in idx.matchingForIngredient(ing, recipeTags)) {
+              if (rr.action == SubAction.never) {
+                if (kDebugMode) {
+                  debugPrint('[SubRules][filter] drop ${r.name} due to NEVER on ${ing.name}');
+                }
+                return false;
+              }
+            }
+          }
+          return true;
+        }).toList(growable: false);
+      }
+    } catch (_) {
+      // ignore subrules errors
+    }
 
     // Apply taste hard bans unless explicitly allowed
     if (rules != null) {
@@ -140,6 +169,31 @@ class PlanGenerationService {\r\n  PlanGenerationService({Random? rng, Ref? ref}
             debugPrint('[Taste][score] ${r.name} t=${taste.toStringAsFixed(2)}');
           }
         }
+
+        // SubRules: small prefer nudge when recipe matches FROM and TO is present/feasible
+        try {
+          final idx = _ref == null ? null : await _ref!.read(subRulesIndexProvider.future);
+          if (idx != null && r.items.isNotEmpty) {
+            final recipeTags = r.dietFlags.toSet();
+            final itemIds = r.items.map((e) => e.ingredientId).toSet();
+            double preferBonus = 0.0;
+            for (final it in r.items) {
+              final ing = ingById[it.ingredientId];
+              if (ing == null) continue;
+              for (final sr in idx.matchingForIngredient(ing, recipeTags)) {
+                if (sr.action == SubAction.prefer) {
+                  if (sr.to != null && sr.to!.kind == 'ingredient') {
+                    // if recipe already contains the target, tiny nudge; else even smaller
+                    preferBonus += itemIds.contains(sr.to!.value) ? 0.15 : 0.08;
+                  } else {
+                    preferBonus += 0.05;
+                  }
+                }
+              }
+            }
+            if (preferBonus > 0) score += preferBonus;
+          }
+        } catch (_) {}
         baseScores[r.id] = score;
       }
       pool.sort((a, b) => (baseScores[b.id] ?? 0).compareTo(baseScores[a.id] ?? 0)); // higher score first
