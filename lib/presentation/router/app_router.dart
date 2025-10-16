@@ -12,6 +12,8 @@ import '../pages/settings/settings_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
 import '../pages/import/import_recipe_page.dart';
+import '../pages/batch/batch_hub_page.dart';
+import '../pages/batch/batch_session_details_page.dart';
 import '../providers/database_providers.dart';
 
 /// SharedPreferences flag for onboarding completion (v1)
@@ -46,6 +48,8 @@ class AppRouter {
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
   static const String importRecipe = '/import';
+  static const String batch = '/batch';
+  static const String batchDetails = '/batch/:id';
 
   static final List<GoRoute> _routes = [
     GoRoute(
@@ -120,6 +124,22 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const ImportRecipePage(),
+      ),
+    ),
+    GoRoute(
+      path: batch,
+      name: 'batch',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const BatchHubPage(),
+      ),
+    ),
+    GoRoute(
+      path: batchDetails,
+      name: 'batch-details',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: BatchSessionDetailsPage(sessionId: state.pathParameters['id']!),
       ),
     ),
   ];
