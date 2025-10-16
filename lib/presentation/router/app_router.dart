@@ -12,6 +12,7 @@ import '../pages/settings/settings_page.dart';
 import '../pages/settings/taste_profile_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
+import '../pages/pricing/price_history_page.dart';
 import '../pages/import/import_recipe_page.dart';
 import '../pages/batch/batch_hub_page.dart';
 import '../pages/batch/batch_session_details_page.dart';
@@ -50,6 +51,7 @@ class AppRouter {
   static const String multiweekSeries = '/multiweek/:id';
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
+  static const String priceHistory = '/pricing/history';
   static const String settings = '/settings';
   static const String tasteSettings = '/settings/taste';
   static const String storeProfiles = '/settings/store-profiles';
@@ -83,6 +85,14 @@ class AppRouter {
         key: state.pageKey,
         // Allow optional planId via query param: /plan?id=...
         child: PlanPage(planId: state.uri.queryParameters['id']),
+      ),
+    ),
+    GoRoute(
+      path: priceHistory,
+      name: 'price-history',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const PriceHistoryPage(),
       ),
     ),
     GoRoute(

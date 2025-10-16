@@ -33,6 +33,11 @@ import '../../../domain/services/substitution_cost_service.dart';
 import '../../../domain/entities/store_profile.dart';
 import '../../../domain/services/split_shopping_prefs.dart';
 import '../../providers/split_shopping_providers.dart';
+import 'best_buys_card.dart';
+// Price history & analytics
+import '../../../domain/services/price_history_service.dart';
+import '../../../domain/services/price_analytics_service.dart';
+import '../../providers/price_providers.dart';
 
 /// Weekly Shopping List built from the current planÃ¢â‚¬â„¢s recipe.items.
 /// Uses shoppingListItemsProvider (reactive) which already aggregates and groups
@@ -115,12 +120,16 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                   await ref.read(routePrefsServiceProvider).setCollapsed(planId, allKeys);
                 } else if (v == 'expand') {
                   await ref.read(routePrefsServiceProvider).setCollapsed(planId, <String>{});
+                } else if (v == 'history') {
+                  context.go(AppRouter.priceHistory);
                 }
                 ref.invalidate(collapsedSectionsProvider(planId));
               },
               itemBuilder: (_) => const [
                 PopupMenuItem<String>(value: 'collapse', child: Text('Collapse all')),
                 PopupMenuItem<String>(value: 'expand', child: Text('Expand all')),
+                PopupMenuDivider(),
+                PopupMenuItem<String>(value: 'history', child: Text('Price History')),
               ],
             );
           }),
@@ -246,6 +255,8 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                   ),
                 ),
               ),
+              // Best Buys card
+              const BestBuysCard(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
                 child: Row(
@@ -664,6 +675,8 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
         _checked.remove(k);
       } else {
         _checked.add(k);
+        // Price confirm sheet (log to history) then Pantry editor
+        _maybeConfirmAndLogPrice(item);
         // Prompt to add to Pantry (non-blocking)
         final ingredient = item.ingredient;
         final qty = item.totalQty; // already in ingredient base unit
@@ -701,6 +714,33 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
     _saveCheckedForPlan();
     // Keep compare totals in sync with checked state
     ref.invalidate(storeQuotesProvider);
+  }
+
+  Future<void> _maybeConfirmAndLogPrice(AggregatedShoppingItem item) async {
+    final plan = ref.read(currentPlanProvider).asData?.value;
+    final planId = plan?.id;
+    String? preselectedStoreId;
+    if (planId != null) {
+      final mode = ref.read(splitModeProvider(planId)).value;
+      final lineId = '${item.ingredient.id}|${item.unit.name}';
+      if (mode == 'split') {
+        final r = ref.read(splitResultProvider(planId)).value;
+        preselectedStoreId = r?.assignments[lineId];
+      }
+    }
+    preselectedStoreId ??= ref.read(selectedStoreProvider).value?.id;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _ConfirmPriceSheet(
+        ingredientItem: item,
+        preselectedStoreId: preselectedStoreId,
+      ),
+    );
+    // Invalidate price history for this ingredient so any panels/cards refresh
+    ref.invalidate(priceHistoryByIngredientProvider(item.ingredient.id));
   }
 
   String _itemKey(AggregatedShoppingItem i) =>
@@ -864,6 +904,7 @@ class _AisleSection extends StatelessWidget {
                       ),
                     ),
                     if (planId != null) _SplitStoreBadge(planId: planId!, lineId: lineId),
+                    // TODO: Future – attach quick price chips/sparkline here
                     PopupMenuButton<String>(
                       tooltip: 'More',
                       onSelected: (v) async {
@@ -895,6 +936,168 @@ class _AisleSection extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ConfirmPriceSheet extends ConsumerStatefulWidget {
+  const _ConfirmPriceSheet({required this.ingredientItem, this.preselectedStoreId});
+  final AggregatedShoppingItem ingredientItem;
+  final String? preselectedStoreId;
+
+  @override
+  ConsumerState<_ConfirmPriceSheet> createState() => _ConfirmPriceSheetState();
+}
+
+class _ConfirmPriceSheetState extends ConsumerState<_ConfirmPriceSheet> {
+  final _priceController = TextEditingController();
+  final _qtyController = TextEditingController();
+  ing.Unit _unit = ing.Unit.grams;
+  String? _storeId;
+  String? _note;
+  String? _warning;
+
+  @override
+  void initState() {
+    super.initState();
+    final ingMeta = widget.ingredientItem.ingredient;
+    final pack = ingMeta.purchasePack;
+    _qtyController.text = (pack.qty > 0 ? pack.qty : 0).toStringAsFixed(0);
+    _unit = pack.unit;
+    _storeId = widget.preselectedStoreId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ingMeta = widget.ingredientItem.ingredient;
+    final storesAsync = ref.watch(storeProfilesProvider);
+    final currency = NumberFormat.simpleCurrency();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          top: 8,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Confirm Price', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(ingMeta.name, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(labelText: 'Price paid (${currency.currencySymbol})'),
+                    controller: _priceController,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Pack qty'),
+                    controller: _qtyController,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                DropdownButton<ing.Unit>(
+                  value: _unit,
+                  onChanged: (v) => setState(() => _unit = v ?? _unit),
+                  items: const [
+                    DropdownMenuItem(value: ing.Unit.grams, child: Text('g')),
+                    DropdownMenuItem(value: ing.Unit.milliliters, child: Text('ml')),
+                    DropdownMenuItem(value: ing.Unit.piece, child: Text('pc')),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            storesAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (stores) {
+                final id = _storeId ?? (stores.isNotEmpty ? stores.first.id : null);
+                _storeId = id;
+                return Row(children: [
+                  const Icon(Icons.store_mall_directory_outlined, size: 18),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: _storeId,
+                    onChanged: (v) => setState(() => _storeId = v),
+                    items: [
+                      for (final s in stores)
+                        DropdownMenuItem<String>(
+                          value: s.id,
+                          child: Text('${s.emoji ?? '🏬'} ${s.name}'),
+                        ),
+                    ],
+                  ),
+                ]);
+              },
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              decoration: const InputDecoration(labelText: 'Note (promo, club, clearance)'),
+              onChanged: (v) => _note = v.trim().isEmpty ? null : v.trim(),
+            ),
+            if (_warning != null) ...[
+              const SizedBox(height: 8),
+              Text(_warning!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Skip'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () async {
+                    final price = double.tryParse(_priceController.text.trim());
+                    final qty = double.tryParse(_qtyController.text.trim());
+                    if (price == null || price <= 0 || qty == null || qty <= 0 || _storeId == null) {
+                      setState(() => _warning = 'Enter price, pack size, and store');
+                      return;
+                    }
+                    final priceCents = (price * 100).round();
+                    final ppu = ref.read(priceAnalyticsServiceProvider).computeCanonicalPpuCents(
+                          priceCents: priceCents,
+                          packQty: qty,
+                          packUnit: _unit,
+                          ingredient: ingMeta,
+                        );
+                    if (ppu == null) {
+                      setState(() => _warning = 'Cannot compute PPU: unit conversion requires density or per-piece size');
+                      return;
+                    }
+                    final p = PricePoint(
+                      id: newPricePointId(),
+                      ingredientId: ingMeta.id,
+                      storeId: _storeId!,
+                      priceCents: priceCents,
+                      packQty: qty,
+                      packUnit: _unit,
+                      ppuCents: ppu,
+                      at: DateTime.now(),
+                      note: _note,
+                    );
+                    await ref.read(priceHistoryServiceProvider).add(p);
+                    if (mounted) Navigator.of(context).pop();
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
