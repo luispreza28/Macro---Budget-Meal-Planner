@@ -15,6 +15,7 @@ import '../pages/import/import_recipe_page.dart';
 import '../pages/batch/batch_hub_page.dart';
 import '../pages/batch/batch_session_details_page.dart';
 import '../providers/database_providers.dart';
+import '../pages/periodization/phase_planner_page.dart';
 
 /// SharedPreferences flag for onboarding completion (v1)
 const kOnboardingDone = 'onboarding.done.v1';
@@ -50,6 +51,7 @@ class AppRouter {
   static const String importRecipe = '/import';
   static const String batch = '/batch';
   static const String batchDetails = '/batch/:id';
+  static const String periodization = '/periodization';
 
   static final List<GoRoute> _routes = [
     GoRoute(
@@ -140,6 +142,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: BatchSessionDetailsPage(sessionId: state.pathParameters['id']!),
+      ),
+    ),
+    GoRoute(
+      path: periodization,
+      name: 'periodization',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const PhasePlannerPage(),
       ),
     ),
   ];

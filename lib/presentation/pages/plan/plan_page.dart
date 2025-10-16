@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:typed_data';
+import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +11,8 @@ import 'package:go_router/go_router.dart';
 import '../../providers/plan_providers.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/user_targets_providers.dart';
+import '../../providers/periodization_providers.dart';
+import '../../../domain/services/periodization_service.dart';
 import '../../router/app_router.dart';
 import '../../widgets/plan_widgets/totals_bar.dart';
 import '../../widgets/plan_widgets/weekly_plan_grid.dart';
@@ -121,7 +124,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
   @override
   Widget build(BuildContext context) {
     final currentPlanAsync = ref.watch(currentPlanProvider);
-    final userTargetsAsync = ref.watch(currentUserTargetsProvider);
+    final decoratedTargetsAsync = ref.watch(decoratedUserTargetsProvider);
     final recipesAsync = ref.watch(allRecipesProvider);
     final ingredientsAsync = ref.watch(allIngredientsProvider); // <— NEW
 
@@ -209,11 +212,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
           ),
         ],
       ),
-      body: userTargetsAsync.when(
+      body: decoratedTargetsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, stack) => _buildErrorState(error.toString()),
-        data: (targets) {
-          if (targets == null) {
+        data: (decorated) {
+          if (decorated == null) {
             return _buildNoTargetsState();
           }
 
@@ -253,9 +256,11 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                   recipes: recipeMap,
                                 ),
                               ),
-                              // Totals bar
+                              // Phase banner (if active)
+                              _PhaseBanner(decorated: decorated),
+                              // Totals bar (use decorated targets copy)
                               TotalsBar(
-                                targets: targets,
+                                targets: decorated.toUserTargets(),
                                 actualKcal:
                                     plan.totals.kcal / 7, // Daily average
                                 actualProteinG: plan.totals.proteinG / 7,
@@ -263,7 +268,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualFatG: plan.totals.fatG / 7,
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
-                                showBudget: targets.budgetCents != null,
+                                showBudget: decorated.base.budgetCents != null,
                               ),
 
                               // Use soon nudge
@@ -354,6 +359,88 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       ),
     );
   }
+
+  // Phase banner widget
+}
+
+class _PhaseBanner extends StatelessWidget {
+  const _PhaseBanner({required this.decorated});
+  final DecoratedTargets decorated;
+
+  @override
+  Widget build(BuildContext context) {
+    final phase = decorated.phase;
+    if (phase == null) return const SizedBox.shrink();
+    final fmt = DateFormat.MMMd();
+    final now = DateTime.now();
+    final daysInPhase = phase.end.difference(DateTime(phase.start.year, phase.start.month, phase.start.day)).inDays + 1;
+    final totalWeeks = ((daysInPhase + 6) / 7).ceil().clamp(1, 100);
+    final weekIndex = ((DateTime(now.year, now.month, now.day).difference(DateTime(phase.start.year, phase.start.month, phase.start.day)).inDays) / 7).floor() + 1;
+    final wk = weekIndex.clamp(1, totalWeeks);
+
+    Widget chipFor(PhaseType t) {
+      switch (t) {
+        case PhaseType.cut:
+          return const Chip(label: Text('CUT'));
+        case PhaseType.maintain:
+          return const Chip(label: Text('MAINTAIN'));
+        case PhaseType.bulk:
+          return const Chip(label: Text('BULK'));
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  chipFor(phase.type),
+                  const SizedBox(width: 8),
+                  Text('${fmt.format(phase.start)} → ${fmt.format(phase.end)} · wk $wk/$totalWeeks',
+                      style: Theme.of(context).textTheme.bodyMedium),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => GoRouter.of(context).go(AppRouter.periodization),
+                    child: const Text('Edit phases'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  _pill(context, 'Target ${decorated.kcal.toStringAsFixed(0)} kcal'),
+                  _pill(context, 'P ${decorated.p.toStringAsFixed(0)}'),
+                  _pill(context, 'C ${decorated.c.toStringAsFixed(0)}'),
+                  _pill(context, 'F ${decorated.f.toStringAsFixed(0)}'),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _pill(BuildContext context, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(text, style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: Theme.of(context).colorScheme.onSecondaryContainer,
+          )),
+    );
+  }
+}
 
   String _planWeekKeyForPlan(Plan plan) {
     final overlaySvc = ref.read(leftoversOverlayServiceProvider);
@@ -649,6 +736,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
             onPressed: () {
               ref.invalidate(currentPlanProvider);
               ref.invalidate(currentUserTargetsProvider);
+              ref.invalidate(decoratedUserTargetsProvider);
             },
             child: const Text('Retry'),
           ),
@@ -853,14 +941,14 @@ class _PlanPageState extends ConsumerState<PlanPage> {
   Future<void> _generateCheaperPlan() async {
     try {
       final recipes = await ref.read(allRecipesProvider.future);
-      final targets = await ref.read(currentUserTargetsProvider.future);
+      final decorated = await ref.read(decoratedUserTargetsProvider.future);
       final ingredients = await ref.read(allIngredientsProvider.future);
       // Keep room for future use of these signals
       // final pinnedSlots = await ref.read(pinsForCurrentPlanProvider.future);
       // final excluded = await ref.read(excludedRecipesProvider.future);
       // final favorites = await ref.read(favoriteRecipesProvider.future);
 
-      if (targets == null) {
+      if (decorated == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please complete setup first')),
@@ -881,7 +969,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
 
       final generator = ref.read(planGenerationServiceProvider);
       final plan = await generator.generate(
-        targets: targets,
+        targets: decorated.toUserTargets(),
         recipes: recipes,
         ingredients: ingredients,
         costBias: 0.9, // Strong nudge toward cheaper options
@@ -962,13 +1050,13 @@ class _PlanPageState extends ConsumerState<PlanPage> {
   Future<void> _generateNewPlan() async {
     try {
       final recipes = await ref.read(allRecipesProvider.future);
-      final targets = await ref.read(currentUserTargetsProvider.future);
+      final decorated = await ref.read(decoratedUserTargetsProvider.future);
       final ingredients = await ref.read(allIngredientsProvider.future);
       final pinnedSlots = await ref.read(pinsForCurrentPlanProvider.future);
       final excluded = await ref.read(excludedRecipesProvider.future);
       final favorites = await ref.read(favoriteRecipesProvider.future);
 
-      if (targets == null) {
+      if (decorated == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please complete setup first')),
@@ -989,7 +1077,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
 
       final generator = ref.read(planGenerationServiceProvider);
       final plan = await generator.generate(
-        targets: targets,
+        targets: decorated.toUserTargets(),
         recipes: recipes,
         ingredients: ingredients,
         favoriteBias: 0.25,
