@@ -32,6 +32,10 @@ import '../../providers/plan_pin_providers.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/variety_options.dart';
 import '../../../domain/services/variety_prefs_service.dart';
+import '../../providers/leftovers_providers.dart';
+import '../../../domain/services/leftovers_overlay_service.dart';
+import '../../../domain/services/leftovers_inventory_service.dart';
+import '../../../domain/services/leftovers_scheduler_service.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -239,6 +243,15 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                         children: [
                           Column(
                             children: [
+                              // Auto-schedule leftovers controls
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: _LeftoversHeader(
+                                  plan: plan,
+                                  ref: ref,
+                                  recipes: recipeMap,
+                                ),
+                              ),
                               // Totals bar
                               TotalsBar(
                                 targets: targets,
@@ -270,8 +283,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                   plan: plan,
                                   recipes: recipeMap,
                                   ingredients:
-                                      ingredientMap, // <— NEW required param
+                                      ingredientMap, // <- NEW required param
                                   selectedMealIndex: selectedMealIndex,
+                                  planWeekKey: _planWeekKeyForPlan(plan),
                                   onMealTap: (dayIndex, mealIndex) {
                                     _handleMealTap(
                                       dayIndex,
@@ -317,6 +331,276 @@ class _PlanPageState extends ConsumerState<PlanPage> {
           );
         },
       ),
+    );
+  }
+
+  String _planWeekKeyForPlan(Plan plan) {
+    final overlaySvc = ref.read(leftoversOverlayServiceProvider);
+    final first = plan.days.first.dateTime;
+    // Align to Monday 00:00 of the week containing the first day
+    final weekday = first.weekday; // Monday=1
+    final monday = DateTime(first.year, first.month, first.day).subtract(Duration(days: weekday - DateTime.monday));
+    final weekStart = DateTime(monday.year, monday.month, monday.day);
+    return overlaySvc.planWeekKey(planId: plan.id, weekStart: weekStart);
+  }
+
+  // Header UI for leftovers toggle + review
+  Widget _LeftoversHeader({required Plan plan, required WidgetRef ref, required Map<String, Recipe> recipes}) {
+    final planWeekKey = _planWeekKeyForPlan(plan);
+    return Consumer(
+      builder: (context, ref, _) {
+        final enabledAsync = ref.watch(autoLeftoversEnabledProvider(planWeekKey));
+        final enabled = enabledAsync.asData?.value ?? false;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Auto-schedule leftovers',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      Text(
+                        'Fill this week with leftover portions before they expire',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: enabled,
+                  onChanged: (v) async {
+                    final overlaySvc = ref.read(leftoversOverlayServiceProvider);
+                    await overlaySvc.setAutoEnabled(planWeekKey, v);
+                    if (v) {
+                      // compute suggestions and persist overlays immediately
+                      final firstDay = plan.days.first.dateTime;
+                      final weekday = firstDay.weekday;
+                      final monday = DateTime(firstDay.year, firstDay.month, firstDay.day)
+                          .subtract(Duration(days: weekday - DateTime.monday));
+                      final weekStart = DateTime(monday.year, monday.month, monday.day);
+                      final args = LeftoverSuggestionArgs(planId: plan.id, weekStart: weekStart);
+                      final suggestions = await ref.read(leftoverSuggestionsProvider(args).future);
+                      await overlaySvc.saveAll(planWeekKey, suggestions);
+                      ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                    } else {
+                      // turning off doesn't clear overlays, just disables applying/visibility
+                    }
+                    ref.invalidate(autoLeftoversEnabledProvider(planWeekKey));
+                    setState(() {});
+                  },
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  onPressed: () {
+                    _showReviewLeftoversSheet(plan, planWeekKey, recipes);
+                  },
+                  child: const Text('Review leftovers'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showReviewLeftoversSheet(Plan plan, String planWeekKey, Map<String, Recipe> recipes) async {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return Consumer(builder: (context, ref, _) {
+          final overlaysAsync = ref.watch(overlaysForWeekProvider(planWeekKey));
+          final invSvc = ref.read(leftoversInventoryServiceProvider);
+          return overlaysAsync.when(
+            loading: () => const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
+            error: (e, st) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text('Failed to load leftovers'),
+            ),
+            data: (overlays) {
+              return FutureBuilder(
+                future: invSvc.list(),
+                builder: (context, snap) {
+                  final portions = snap.data ?? const <PreparedPortion>[];
+                  return SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 12, left: 12, right: 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8, bottom: 8),
+                            child: Text('Leftovers for this week', style: Theme.of(context).textTheme.titleMedium),
+                          ),
+                          if (overlays.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text('No leftovers scheduled.'),
+                            ),
+                          Flexible(
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: overlays.length,
+                              itemBuilder: (context, i) {
+                                final p = overlays[i];
+                                final matches = portions.where((x) => x.id == p.portionId).toList();
+                                final PreparedPortion? portion = matches.isEmpty ? null : matches.first;
+                                final recipe = recipes[p.recipeId];
+                                final expiresIn = portion == null
+                                    ? ''
+                                    : 'expires in ${portion.expiresAt.difference(DateTime.now()).inDays}d';
+                                return ListTile(
+                                  title: Text(recipe?.name ?? p.recipeId),
+                                  subtitle: Text('Day ${p.dayIndex + 1} • Meal ${p.mealIndex + 1}  ${expiresIn}'),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Switch(
+                                        value: p.confirmed,
+                                        onChanged: (v) async {
+                                          final svc = ref.read(leftoversOverlayServiceProvider);
+                                          final list = List<LeftoverPlacement>.from(overlays);
+                                          list[i] = list[i].copyWith(confirmed: v);
+                                          await svc.saveAll(planWeekKey, list);
+                                          ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                        },
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Move',
+                                        icon: const Icon(Icons.drive_file_move_outline),
+                                        onPressed: () async {
+                                          final picked = await showDialog<(int,int)?>(
+                                            context: context,
+                                            builder: (dctx) => _PickSlotDialog(initialDay: p.dayIndex, initialMeal: p.mealIndex, plan: plan),
+                                          );
+                                          if (picked != null) {
+                                            final svc = ref.read(leftoversOverlayServiceProvider);
+                                            final list = List<LeftoverPlacement>.from(overlays);
+                                            list[i] = list[i].copyWith(dayIndex: picked.$1, mealIndex: picked.$2);
+                                            await svc.saveAll(planWeekKey, list);
+                                            ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                          }
+                                        },
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Skip',
+                                        icon: const Icon(Icons.close),
+                                        onPressed: () async {
+                                          final svc = ref.read(leftoversOverlayServiceProvider);
+                                          final list = List<LeftoverPlacement>.from(overlays)..removeAt(i);
+                                          await svc.saveAll(planWeekKey, list);
+                                          ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              OutlinedButton(
+                                onPressed: () async {
+                                  // Clear all
+                                  final svc = ref.read(leftoversOverlayServiceProvider);
+                                  await svc.saveAll(planWeekKey, const []);
+                                  ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                },
+                                child: const Text('Clear all'),
+                              ),
+                              const Spacer(),
+                              FilledButton(
+                                onPressed: () {
+                                  Navigator.of(context).maybePop();
+                                },
+                                child: const Text('Done'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        });
+      },
+    );
+  }
+
+  // Simple slot picker dialog
+  Widget _pickTile(String label, bool selected) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          color: selected ? Theme.of(context).colorScheme.primaryContainer : null,
+        ),
+        child: Text(label),
+      );
+
+  (int, int)? _validateDayMeal(Plan plan, int day, int meal) {
+    if (day < 0 || day >= plan.days.length) return null;
+    if (meal < 0 || meal >= plan.days[day].meals.length) return null;
+    return (day, meal);
+  }
+
+  // ignore: non_constant_identifier_names
+  Dialog _PickSlotDialog({required int initialDay, required int initialMeal, required Plan plan}) {
+    int d = initialDay;
+    int m = initialMeal;
+    return Dialog(
+      child: StatefulBuilder(builder: (context, setState) {
+        return Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Move to…', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Text('Day:'),
+                  const SizedBox(width: 8),
+                  DropdownButton<int>(
+                    value: d,
+                    items: List.generate(plan.days.length, (i) => DropdownMenuItem(value: i, child: Text('Day ${i + 1}'))),
+                    onChanged: (v) => setState(() => d = v ?? d),
+                  ),
+                  const SizedBox(width: 16),
+                  const Text('Meal:'),
+                  const SizedBox(width: 8),
+                  DropdownButton<int>(
+                    value: m,
+                    items: List.generate(plan.days[d].meals.length, (i) => DropdownMenuItem(value: i, child: Text('Meal ${i + 1}'))),
+                    onChanged: (v) => setState(() => m = v ?? m),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(_validateDayMeal(plan, d, m)),
+                    child: const Text('Apply'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }),
     );
   }
 

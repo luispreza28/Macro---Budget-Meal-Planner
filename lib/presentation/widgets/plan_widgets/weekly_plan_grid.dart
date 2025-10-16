@@ -8,6 +8,9 @@ import 'meal_card.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/plan_pin_providers.dart';
 import '../../../domain/services/plan_pin_service.dart';
+import '../../providers/leftovers_providers.dart';
+import '../../../domain/services/leftovers_overlay_service.dart';
+import '../../../domain/services/leftovers_inventory_service.dart';
 
 /// 7-day meal plan grid widget
 class WeeklyPlanGrid extends StatelessWidget {
@@ -19,6 +22,7 @@ class WeeklyPlanGrid extends StatelessWidget {
     required this.ingredients, // NEW
     this.selectedMealIndex,
     this.ingredientNameById = const {},
+    required this.planWeekKey,
   });
 
   final Plan plan;
@@ -27,6 +31,7 @@ class WeeklyPlanGrid extends StatelessWidget {
   final Function(int dayIndex, int mealIndex) onMealTap;
   final int? selectedMealIndex;
   final Map<String, String> ingredientNameById;
+  final String planWeekKey;
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +63,7 @@ class WeeklyPlanGrid extends StatelessWidget {
                 dayIndex: dayIndex,
                 ingredientNameById: ingredientNameById,
                 planId: plan.id,
+                planWeekKey: planWeekKey,
               ),
               if (dayIndex < plan.days.length - 1) const SizedBox(height: 24),
             ],
@@ -142,6 +148,7 @@ class _MealsRow extends StatelessWidget {
     this.selectedMealIndex,
     this.ingredientNameById = const {},
     required this.planId,
+    required this.planWeekKey,
   });
 
   final List<PlanMeal> meals;
@@ -152,6 +159,7 @@ class _MealsRow extends StatelessWidget {
   final int dayIndex;
   final Map<String, String> ingredientNameById;
   final String planId;
+  final String planWeekKey;
 
   @override
   Widget build(BuildContext context) {
@@ -212,13 +220,32 @@ class _MealsRow extends StatelessWidget {
                       final pins = pinsAsync.asData?.value ?? const <String, String>{};
                       final slotKey = 'd${dayIndex}-m${mealIndex}';
                       final pinned = pins.containsKey(slotKey);
+                      final overlaysAsync = ref.watch(overlaysForWeekProvider(planWeekKey));
+                      final overlays = overlaysAsync.asData?.value ?? const <LeftoverPlacement>[];
+                      final confirmed = overlays.where((p) => p.dayIndex == dayIndex && p.mealIndex == mealIndex && p.confirmed).toList();
+                      final suggested = overlays.where((p) => p.dayIndex == dayIndex && p.mealIndex == mealIndex && !p.confirmed).toList();
+                      final placement = confirmed.isNotEmpty ? confirmed.first : (suggested.isNotEmpty ? suggested.first : null);
                       return Stack(
                         children: [
                           MealCard(
                             recipe: recipe,
                             servings: meal.servings,
                             ingredients: ingredients, // NEW
-                            onTap: () => onMealTap(mealIndex),
+                            onTap: () async {
+                              // If there is an unconfirmed suggestion for this slot, confirm it on tap
+                              if (placement != null && !placement.confirmed) {
+                                final svc = ref.read(leftoversOverlayServiceProvider);
+                                final list = List<LeftoverPlacement>.from(overlays);
+                                final idx = list.indexWhere((p) => p.dayIndex == dayIndex && p.mealIndex == mealIndex && p.portionId == placement.portionId);
+                                if (idx >= 0) {
+                                  list[idx] = list[idx].copyWith(confirmed: true);
+                                  await svc.saveAll(planWeekKey, list);
+                                  ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                }
+                              } else {
+                                onMealTap(mealIndex);
+                              }
+                            },
                             isSelected: isSelected,
                             ingredientNameById: ingredientNameById,
                             onInfoTap: () => context.push('/recipe/${recipe.id}'),
@@ -261,6 +288,85 @@ class _MealsRow extends StatelessWidget {
                               },
                             ),
                           ),
+                          // Leftover badges/actions
+                          if (placement != null)
+                            Positioned(
+                              bottom: 8,
+                              left: 8,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      color: placement.confirmed
+                                          ? Theme.of(context).colorScheme.primaryContainer
+                                          : Theme.of(context).colorScheme.surfaceVariant,
+                                    ),
+                                    child: Text(
+                                      placement.confirmed ? 'Leftover' : 'Suggest: Leftover',
+                                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                            color: placement.confirmed
+                                                ? Theme.of(context).colorScheme.onPrimaryContainer
+                                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  if (placement.confirmed)
+                                    Tooltip(
+                                      message: 'Mark leftover used',
+                                      child: IconButton(
+                                        visualDensity: VisualDensity.compact,
+                                        icon: const Icon(Icons.check_circle_outline, size: 18),
+                                        onPressed: () async {
+                                          // Decrement inventory and remove placement
+                                          final inv = ref.read(leftoversInventoryServiceProvider);
+                                          final overlaySvc = ref.read(leftoversOverlayServiceProvider);
+                                          final portions = await inv.list();
+                                          final match = portions.firstWhere(
+                                            (p) => p.id == placement.portionId,
+                                            orElse: () => const PreparedPortion(
+                                              id: '',
+                                              recipeId: '',
+                                              servingsRemaining: 0,
+                                              preparedAt: DateTime.fromMillisecondsSinceEpoch(0),
+                                              expiresAt: DateTime.fromMillisecondsSinceEpoch(0),
+                                            ),
+                                          );
+                                          if (match.id.isNotEmpty) {
+                                            final next = match.copyWith(servingsRemaining: match.servingsRemaining - 1);
+                                            if (next.servingsRemaining > 0) {
+                                              await inv.upsert(next);
+                                            } else {
+                                              await inv.remove(match.id);
+                                            }
+                                          }
+                                          final list = List<LeftoverPlacement>.from(overlays)
+                                            ..removeWhere((p) => p.dayIndex == dayIndex && p.mealIndex == mealIndex && p.portionId == placement.portionId);
+                                          await overlaySvc.saveAll(planWeekKey, list);
+                                          ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                        },
+                                      ),
+                                    ),
+                                  Tooltip(
+                                    message: placement.confirmed ? 'Skip leftover' : 'Dismiss suggestion',
+                                    child: IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      icon: const Icon(Icons.close, size: 18),
+                                      onPressed: () async {
+                                        final overlaySvc = ref.read(leftoversOverlayServiceProvider);
+                                        final list = List<LeftoverPlacement>.from(overlays)
+                                          ..removeWhere((p) => p.dayIndex == dayIndex && p.mealIndex == mealIndex && p.portionId == placement.portionId);
+                                        await overlaySvc.saveAll(planWeekKey, list);
+                                        ref.invalidate(overlaysForWeekProvider(planWeekKey));
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       );
                     },
