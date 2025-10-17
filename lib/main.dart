@@ -1,6 +1,11 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:ui';
+import 'package:flutter/foundation.dart';
+import 'domain/services/telemetry_settings_service.dart';
+import 'domain/services/telemetry_service.dart';
+import 'presentation/providers/telemetry_observer.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/errors/error_handler.dart';
@@ -29,29 +34,49 @@ void main() async {
     final sharedPreferences = await SharedPreferences.getInstance();
     AppLogger.d('SharedPreferences initialized');
 
-    // Create provider container
-    final container = ProviderContainer(
+    // Temporary container for early telemetry init and pre-app tasks
+    final tempContainer = ProviderContainer(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(sharedPreferences),
       ],
     );
 
-    await container.read(dataIntegrityInitializationProvider.future);
+    final telemetry = tempContainer.read(telemetryServiceProvider);
+    await telemetry.init();
+
+    // Patch global error handling in release only
+    if (!kDebugMode) {
+      FlutterError.onError = (details) {
+        telemetry.recordError(details.exception, details.stack ?? StackTrace.current, reason: 'FlutterError');
+      };
+      PlatformDispatcher.instance.onError = (error, stack) {
+        telemetry.recordError(error, stack, reason: 'ZoneError');
+        return true;
+      };
+    }
+
+    await tempContainer.read(dataIntegrityInitializationProvider.future);
 
     // Initialize lifecycle management
-    AppLifecycleManager.initialize(container);
+    AppLifecycleManager.initialize(tempContainer);
     AppLogger.d('App lifecycle manager initialized');
 
+    await telemetry.event('app_start');
+
     runApp(
-      UncontrolledProviderScope(
-        container: container,
+      ProviderScope(
+        observers: [TelemetryRiverpodObserver(telemetry)],
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(sharedPreferences),
+          telemetryServiceProvider.overrideWithValue(telemetry),
+        ],
         child: const MacroBudgetMealPlannerApp(),
       ),
     );
 
-    // Schedule reminders after first frame
+    // Schedule reminders after first frame using temp container
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      container.read(reminderSchedulerProvider).rescheduleAll();
+      tempContainer.read(reminderSchedulerProvider).rescheduleAll();
     });
 
     AppLogger.i('Application launched successfully');

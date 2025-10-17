@@ -1,4 +1,4 @@
-// lib/presentation/providers/shopping_list_providers.dart
+﻿// lib/presentation/providers/shopping_list_providers.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/entities/ingredient.dart' as ing;
@@ -6,6 +6,7 @@ import '../providers/database_providers.dart';
 import '../providers/plan_providers.dart';
 import '../providers/recipe_providers.dart';
 import '../providers/ingredient_providers.dart';
+import '../../domain/services/telemetry_service.dart';
 import 'dart:convert';
 
 class AggregatedShoppingItem {
@@ -17,6 +18,7 @@ class AggregatedShoppingItem {
     required this.packsNeeded, // ceil(totalQty / purchasePack.qty) if available
   });
 
+
   final ing.Ingredient ingredient;
   final double totalQty;
   final ing.Unit unit;
@@ -25,7 +27,7 @@ class AggregatedShoppingItem {
 }
 
 class ShoppingAisleGroup {
-  ShoppingAisleGroup({required this.aisle, required this.items});
+  ShoppingAisleGroup({required this.aisle, required this.items  });
 
   final ing.Aisle aisle;
   final List<AggregatedShoppingItem> items;
@@ -36,6 +38,8 @@ class ShoppingAisleGroup {
 final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
   ref,
 ) async {
+  final telemetry = ref.read(telemetryServiceProvider);
+  return telemetry.traceAsync('shopping.aggregate', () async {
   // Watch the STREAM providers directly so changes invalidate/recompute this provider.
   final planAsync = ref.watch(currentPlanProvider);
   final recipesAsync = ref.watch(allRecipesProvider);
@@ -44,7 +48,7 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
   final plan = planAsync.value;
   if (plan == null) return const [];
 
-  // If streams haven’t emitted yet, fall back to repos (single shot).
+  // If streams havenâ€™t emitted yet, fall back to repos (single shot).
   // If they have data, use that data.
   final recipeRepo = ref.read(recipeRepositoryProvider);
   final ingredientRepo = ref.read(ingredientRepositoryProvider);
@@ -80,7 +84,8 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
           to: ingMeta.unit,
         );
 
-        final byUnit = totals.putIfAbsent(item.ingredientId, () => {});
+        final byUnit = totals.putIfAbsent(item.ingredientId, () => {  });
+
         byUnit.update(ingMeta.unit, (v) => v + qtyInBase,
             ifAbsent: () => qtyInBase);
       }
@@ -90,7 +95,8 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
   // Merge in user-added extras (e.g., shortfalls) persisted per-plan.
   final extras = await _loadExtrasForPlan(ref, plan.id);
   for (final e in extras) {
-    final byUnit = totals.putIfAbsent(e.ingredientId, () => {});
+    final byUnit = totals.putIfAbsent(e.ingredientId, () => {  });
+
     byUnit.update(e.unit, (v) => v + e.qty, ifAbsent: () => e.qty);
   }
 
@@ -128,8 +134,9 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
           packsNeeded: packs,
         ),
       );
-    });
-  });
+
+
+
 
   if (flat.isEmpty) {
     return const [];
@@ -147,7 +154,7 @@ final shoppingListItemsProvider = FutureProvider<List<ShoppingAisleGroup>>((
 
   groups.sort((a, b) => _aisleOrder(a.aisle).compareTo(_aisleOrder(b.aisle)));
   return groups;
-});
+
 
 int _aisleOrder(ing.Aisle a) {
   // Adjust order to your real-world store path preference
@@ -186,7 +193,8 @@ double _toIngredientUnit({
 // ---------- Extras (persisted Shortfalls) ----------
 
 class _Extra {
-  _Extra({required this.ingredientId, required this.unit, required this.qty});
+  _Extra({required this.ingredientId, required this.unit, required this.qty  });
+
   final String ingredientId;
   final ing.Unit unit;
   final double qty;
@@ -258,4 +266,7 @@ final shoppingListDebugProvider = FutureProvider<String>((ref) async {
   return 'Plan ok. Recipes: $rc, Ingredients: $ic, Meals: $meals, '
       'MissingRecipe: $missingRecipe, EmptyItems: $emptyItems, '
       'MissingIngredientRefs: $missingIngredient, MealsUsable: $ok';
-});
+
+
+
+

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -482,8 +482,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     underline: const SizedBox.shrink(),
                     items: const [
                       DropdownMenuItem(value: 'USD', child: Text('USD (\$)')),
-                      DropdownMenuItem(value: 'EUR', child: Text('EUR (€)')),
-                      DropdownMenuItem(value: 'GBP', child: Text('GBP (£)')),
+                      DropdownMenuItem(value: 'EUR', child: Text('EUR (â‚¬)')),
+                      DropdownMenuItem(value: 'GBP', child: Text('GBP (Â£)')),
                       DropdownMenuItem(value: 'CAD', child: Text('CAD (\$)')),
                     ],
                     onChanged: (value) {
@@ -726,12 +726,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 16),
 
-          // Data & Privacy Section
-          _buildSectionHeader('Data & Privacy'),
-          Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: [
+          
+                ListTile(
+                  leading: const Icon(Icons.analytics_outlined),
+                  title: const Text('Telemetry & Diagnostics'),
+                  subtitle: const Text('Control crash reporting, analytics, and logs'),
+                  trailing: const Icon(Icons.arrow_forward_ios),
+                  onTap: () => context.go(AppRouter.telemetrySettings),
+                ),
+                const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.download),
                   title: const Text('Export Data'),
@@ -1331,7 +1334,7 @@ class _OtherAllergensFieldState extends State<_OtherAllergensField> {
     return TextField(
       controller: _controller,
       decoration: const InputDecoration(
-        labelText: 'Other…',
+        labelText: 'Otherâ€¦',
         hintText: 'comma-separated (e.g., cilantro, mushrooms)',
         prefixIcon: Icon(Icons.warning_amber_outlined),
       ),
@@ -1339,3 +1342,4 @@ class _OtherAllergensFieldState extends State<_OtherAllergensField> {
     );
   }
 }
+
