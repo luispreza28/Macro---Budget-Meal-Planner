@@ -130,6 +130,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 16),
 
+          // Cloud Sync section
+          _buildSectionHeader('Cloud'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: ListTile(
+              leading: const Icon(Icons.cloud_outlined),
+              title: const Text('Cloud Sync & Backup'),
+              subtitle: const Text('Sign-in, backup now, restore, auto-backup'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push(AppRouter.cloudSettings),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Nutrition APIs section
           _buildSectionHeader('Nutrition APIs'),
           _NutritionApisCard(),
