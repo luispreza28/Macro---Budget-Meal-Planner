@@ -102,6 +102,19 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                   },
             icon: const Icon(Icons.checklist_rtl_outlined),
           ),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'batch') {
+                context.push('/scanner/batch');
+              } else if (v == 'queue') {
+                context.push('/scanner/queue');
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(value: 'batch', child: Text('Batch Scan (prices)')),
+              const PopupMenuItem(value: 'queue', child: Text('Scan Queue')),
+            ],
+          ),
         ],
       ),
       body: groupedAsync.when(
