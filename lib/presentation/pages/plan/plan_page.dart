@@ -45,6 +45,7 @@ import '../../providers/multiweek_providers.dart';
 import '../../../domain/services/budget_optimizer_service.dart';
 import '../../../domain/services/budget_settings_service.dart';
 import '../../../domain/services/plan_cost_estimator.dart';
+import '../../providers/micro_providers.dart';
 
 /// Comprehensive plan page with 7-day grid, totals bar, and swap functionality
 class PlanPage extends ConsumerStatefulWidget {
@@ -303,6 +304,63 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 actualCostCents: (plan.totals.costCents / 7)
                                     .round(),
                                 showBudget: decorated.base.budgetCents != null,
+                              ),
+
+                              // Weekly Micros strip (v0)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                                child: Consumer(builder: (context, ref, _) {
+                                  final microsAsync = ref.watch(weeklyMicrosProvider(plan));
+                                  final settingsAsync = ref.watch(microSettingsProvider);
+                                  return microsAsync.when(
+                                    loading: () => const SizedBox.shrink(),
+                                    error: (_, __) => const SizedBox.shrink(),
+                                    data: (tot) {
+                                      final s = settingsAsync.asData?.value ?? const MicroSettings();
+                                      final fiber = tot.fiberG;
+                                      final target = s.weeklyFiberTargetG > 0 ? s.weeklyFiberTargetG : 175.0;
+                                      final pct = (fiber / target).clamp(0.0, 1.0);
+                                      return Card(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(12),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Micros (weekly)', style: Theme.of(context).textTheme.titleMedium),
+                                              const SizedBox(height: 8),
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Text('Fiber: ${fiber.toStringAsFixed(0)} g / ${target.toStringAsFixed(0)} g'),
+                                                        const SizedBox(height: 4),
+                                                        ClipRRect(
+                                                          borderRadius: BorderRadius.circular(4),
+                                                          child: LinearProgressIndicator(value: pct),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Wrap(
+                                                spacing: 12,
+                                                runSpacing: 8,
+                                                children: [
+                                                  Row(children: [const Icon(Icons.water_drop, size: 16), const SizedBox(width: 4), Text('Sodium: ${tot.sodiumMg} mg')]),
+                                                  Row(children: [const Icon(Icons.crisis_alert, size: 16), const SizedBox(width: 4), Text('Sat fat: ${tot.satFatG.toStringAsFixed(1)} g')]),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                }),
                               ),
 
                               // Budget Guardrails v2: Weekly Budget Bar

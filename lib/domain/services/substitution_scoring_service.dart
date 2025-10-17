@@ -15,6 +15,8 @@ import '../../presentation/providers/ingredient_providers.dart';
 import '../../presentation/providers/user_targets_providers.dart';
 import '../../presentation/providers/taste_providers.dart';
 import '../../presentation/providers/sub_rules_providers.dart';
+import '../services/micro_calculator.dart';
+import '../services/micro_settings_service.dart';
 
 final substitutionScoringServiceProvider =
     Provider<SubstitutionScoringService>(
@@ -126,6 +128,9 @@ class SubstitutionScoringService {
       }
     } catch (_) {}
 
+    // Micro settings (for toggle + thresholds)
+    final microSettings = await ref.read(microSettingsServiceProvider).get().catchError((_) => const MicroSettings());
+
     for (final cand in filteredCandidates) {
       // Pantry delta
       final candUtil = await pantrySvc.scoreRecipePantryUse(
@@ -180,6 +185,25 @@ class SubstitutionScoringService {
       if (isFavoriteSet.contains(cand.id)) {
         composite += _favoriteNudge;
       }
+      // Tiny micro-nudges (keep very small to avoid dominance)
+      try {
+        if (microSettings.hintsEnabled) {
+          final calc = ref.read(microCalculatorProvider);
+          final curM = await calc.compute(recipe: current, ingById: ingMap!);
+          final candM = await calc.compute(recipe: cand, ingById: ingMap!);
+          final curKcal = current.macrosPerServ.kcal;
+          final candKcal = cand.macrosPerServ.kcal;
+          final curSatPct = curKcal > 0 ? (curM.satFatGPerServ * 9.0 / curKcal) * 100.0 : 0.0;
+          final candSatPct = candKcal > 0 ? (candM.satFatGPerServ * 9.0 / candKcal) * 100.0 : 0.0;
+          final curHighNa = curM.sodiumMgPerServ >= microSettings.sodiumHighMgPerServ;
+          final candHighNa = candM.sodiumMgPerServ >= microSettings.sodiumHighMgPerServ;
+          final curHighSat = curM.satFatGPerServ >= microSettings.satFatHighGPerServ || curSatPct >= microSettings.satFatHighPctKcal;
+          final candHighSat = candM.satFatGPerServ >= microSettings.satFatHighGPerServ || candSatPct >= microSettings.satFatHighPctKcal;
+          if (curHighNa && !candHighNa) composite += 0.03; // lower sodium
+          if (curHighSat && !candHighSat) composite += 0.03; // lower sat fat
+          if ((candM.fiberGPerServ - curM.fiberGPerServ) >= 2.0) composite += 0.02; // higher fiber
+        }
+      } catch (_) {}
       // Optional small variety penalty: if cuisine is same as current and rotation is enabled
       if (enableCuisineRotation) {
         if ((cand.cuisine?.isNotEmpty ?? false) &&

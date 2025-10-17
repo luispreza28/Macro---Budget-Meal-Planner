@@ -24,6 +24,7 @@ import '../../../domain/services/substitution_cost_service.dart';
 import '../../providers/pantry_providers.dart';
 import '../../providers/taste_providers.dart';
 import '../../../domain/services/taste_profile_service.dart';
+import '../../providers/micro_providers.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
   const RecipeDetailsPage({super.key, required this.recipeId});
@@ -1126,6 +1127,8 @@ class _Header extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final microAsync = ref.watch(recipeMicroReportProvider(recipe.id));
+    final microSettingsAsync = ref.watch(microSettingsProvider);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1246,6 +1249,56 @@ class _Header extends ConsumerWidget {
                   ],
                 ),
               ],
+            ),
+            microAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (report) {
+                final (m, hints) = report;
+                final s = microSettingsAsync.asData?.value;
+                final enabled = s?.hintsEnabled ?? true;
+                if (!enabled) return const SizedBox.shrink();
+                if (!(hints.highSodium || hints.highSatFat || hints.lowFiber)) {
+                  return const SizedBox.shrink();
+                }
+                final errorBg = Theme.of(context).colorScheme.errorContainer;
+                final errorFg = Theme.of(context).colorScheme.onErrorContainer;
+                final warnBg = Theme.of(context).colorScheme.secondaryContainer;
+                final warnFg = Theme.of(context).colorScheme.onSecondaryContainer;
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (hints.highSodium)
+                        _hintChip(
+                          context,
+                          label: 'High sodium',
+                          bg: errorBg,
+                          fg: errorFg,
+                          onTap: () => _showMicrosSheet(context, s, m),
+                        ),
+                      if (hints.highSatFat)
+                        _hintChip(
+                          context,
+                          label: 'High sat fat',
+                          bg: errorBg,
+                          fg: errorFg,
+                          onTap: () => _showMicrosSheet(context, s, m),
+                        ),
+                      if (hints.lowFiber)
+                        _hintChip(
+                          context,
+                          label: 'Low fiber',
+                          bg: warnBg,
+                          fg: warnFg,
+                          onTap: () => _showMicrosSheet(context, s, m),
+                        ),
+                    ],
+                  ),
+                );
+              },
             ),
             if (recipe.dietFlags.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -1376,6 +1429,55 @@ class _Header extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _hintChip(BuildContext context, {required String label, required Color bg, required Color fg, VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+        child: Text(label, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: fg)),
+      ),
+    );
+  }
+
+  void _showMicrosSheet(BuildContext context, dynamic settings, dynamic micros) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Per-serving micros', style: Theme.of(ctx).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Text('Fiber: ${micros.fiberGPerServ.toStringAsFixed(1)} g'),
+              Text('Sodium: ${micros.sodiumMgPerServ} mg'),
+              Text('Sat fat: ${micros.satFatGPerServ.toStringAsFixed(1)} g'),
+              const SizedBox(height: 12),
+              if (settings != null) ...[
+                Text('Configured thresholds:', style: Theme.of(ctx).textTheme.titleSmall),
+                Text('• Fiber low: ${settings.fiberLowGPerServ.toStringAsFixed(1)} g/serv'),
+                Text('• Sodium high: ${settings.sodiumHighMgPerServ} mg/serv'),
+                Text('• Sat fat high: ${settings.satFatHighGPerServ.toStringAsFixed(1)} g/serv or ${settings.satFatHighPctKcal.toStringAsFixed(1)}% kcal'),
+              ],
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(ctx).maybePop(),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

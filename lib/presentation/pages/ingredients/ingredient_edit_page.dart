@@ -7,6 +7,7 @@ import '../../providers/ingredient_providers.dart';
 import '../../widgets/ingredients/ingredient_form.dart';
 import '../../providers/sub_rules_providers.dart';
 import '../../router/app_router.dart';
+import 'ingredient_micros_sheet.dart';
 
 class IngredientEditPage extends ConsumerWidget {
   const IngredientEditPage({super.key, required this.ingredientId});
@@ -48,6 +49,26 @@ class IngredientEditPage extends ConsumerWidget {
                     );
                   }
                 },
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.tonal(
+                    onPressed: () async {
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (_) => Padding(
+                          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+                          child: IngredientMicrosSheet(ingredientId: ing.id),
+                        ),
+                      );
+                    },
+                    child: const Text('Edit Micros (per 100)'),
+                  ),
+                ),
               ),
               const Divider(height: 1),
               Padding(
@@ -134,4 +155,3 @@ class _SubRulesSection extends ConsumerWidget {
     );
   }
 }
-

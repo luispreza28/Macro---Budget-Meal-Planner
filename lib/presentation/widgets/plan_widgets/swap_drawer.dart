@@ -11,6 +11,7 @@ import '../../../domain/services/variety_prefs_service.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/substitution_providers.dart';
 import '../../../domain/value/substitution_score.dart';
+import '../../providers/micro_providers.dart';
 
 /// Bottom drawer for showing meal swap options
 class SwapDrawer extends ConsumerStatefulWidget {
@@ -215,6 +216,8 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                 final isFav = favs.contains(r.id);
                 final currencyFmt = NumberFormat.currency(symbol: '\$');
                 final pantryPct = (s.coverageDelta * 100);
+                final currentMicro = ref.watch(recipeMicroReportProvider(widget.currentRecipe.id));
+                final candMicro = ref.watch(recipeMicroReportProvider(r.id));
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: Padding(
@@ -293,6 +296,32 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                             ),
                           ],
                         ),
+                        // Micro-aware mini cues
+                        Builder(builder: (context) {
+                          final cur = currentMicro.asData?.value;
+                          final cand = candMicro.asData?.value;
+                          if (cur == null || cand == null) return const SizedBox.shrink();
+                          final (_, curHints) = cur;
+                          final (_, candHints) = cand;
+                          final cues = <Widget>[];
+                          if (curHints.highSodium && !candHints.highSodium) {
+                            cues.add(const _ImpactChip(label: 'Lower sodium', isPositive: true, icon: Icons.water_drop));
+                          }
+                          if (curHints.highSatFat && !candHints.highSatFat) {
+                            cues.add(const _ImpactChip(label: 'Lower sat fat', isPositive: true, icon: Icons.crisis_alert));
+                          }
+                          // Higher fiber threshold: ≥ 2g/serv improvement
+                          final curFiber = cur.$0.fiberGPerServ;
+                          final candFiber = cand.$0.fiberGPerServ;
+                          if (candFiber - curFiber >= 2.0) {
+                            cues.add(const _ImpactChip(label: 'Higher fiber', isPositive: true, icon: Icons.grass));
+                          }
+                          if (cues.isEmpty) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Wrap(spacing: 6, runSpacing: 4, children: cues),
+                          );
+                        }),
                       ],
                     ),
                   ),

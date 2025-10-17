@@ -15,6 +15,7 @@ import '../../../domain/services/variety_prefs_service.dart';
 import '../../providers/nutrition_lookup_providers.dart';
 import '../../../domain/services/nutrition_lookup_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'micros_settings_page.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -191,6 +192,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   onTap: () => context.push(AppRouter.budgetSettings),
                 ),
               ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Micronutrient Hints
+          _buildSectionHeader('Micronutrients'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: ListTile(
+              leading: const Icon(Icons.health_and_safety_outlined),
+              title: const Text('Micronutrient Hints'),
+              subtitle: const Text('Enable hints and set thresholds'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                // Use direct push to avoid router edit churn
+                await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MicrosSettingsPage()),
+                );
+              },
             ),
           ),
 
