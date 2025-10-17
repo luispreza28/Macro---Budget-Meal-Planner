@@ -3,8 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart'
-    as ing;
+import 'package:macro_budget_meal_planner/domain/entities/ingredient.dart' as ing;
+import '../../../domain/entities/ingredient.dart' as domain;
 
 import '../../router/app_router.dart';
 import '../../providers/shopping_list_providers.dart';
@@ -15,6 +15,9 @@ import '../../providers/store_providers.dart';
 import '../../../domain/services/store_profile_service.dart';
 import '../../../domain/services/trip_cost_service.dart';
 import 'package:intl/intl.dart';
+import '../../../domain/formatters/units_formatter.dart';
+import '../../../l10n/l10n.dart';
+import '../../providers/locale_units_providers.dart';
 import '../../providers/store_compare_providers.dart';
 import '../../providers/diet_allergen_providers.dart';
 
@@ -69,7 +72,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Shopping List'),
+        title: Text(AppLocalizations.of(context)?.shoppingList ?? 'Shopping List'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
@@ -80,11 +83,11 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
               context.go(AppRouter.home);
             }
           },
-          tooltip: 'Back',
+          tooltip: AppLocalizations.of(context)?.back ?? 'Back',
         ),
         actions: [
           IconButton(
-            tooltip: 'Export (copy to clipboard)',
+            tooltip: AppLocalizations.of(context)?.exportCopyTooltip ?? 'Export (copy to clipboard)',
             onPressed: groupedData.isEmpty
                 ? null
                 : () => _exportCurrent(context, groupedData),
@@ -405,7 +408,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
       buf.writeln('## ${_aisleDisplayName(group.aisle)}');
       for (final it in group.items) {
         buf.writeln(
-          '- ${it.ingredient.name} â€” ${_formatQty(it.totalQty, it.unit)}',
+          '- ${it.ingredient.name} â€” ${_formatQty(it.totalQty, it.unit, ref: ref)}',
         );
       }
       buf.writeln();
@@ -497,7 +500,7 @@ class _AisleSection extends StatelessWidget {
             itemBuilder: (context, i) {
               final it = items[i];
               final name = it.ingredient.name;
-              final qtyStr = _formatQty(it.totalQty, it.unit);
+              final qtyStr = _formatQty(it.totalQty, it.unit, ref: ref);
               final checked = isChecked(it);
 
               final flagged = isFlagged(it);
@@ -772,7 +775,8 @@ void _showCompareStoresModal(BuildContext context, WidgetRef ref) {
             builder: (context, ref, _) {
               final selected = ref.watch(selectedStoreProvider).value;
               final quotesAsync = ref.watch(storeQuotesProvider);
-              final fmt = NumberFormat.currency(symbol: '\$');
+              final settings = ref.watch(localeUnitsSettingsProvider).maybeWhen(data: (s) => s, orElse: () => const LocaleUnitsSettings());
+              final unitsFmt = ref.read(unitsFormatterProvider);
               return quotesAsync.when(
                 loading: () => const Padding(
                   padding: EdgeInsets.all(16),
@@ -791,7 +795,7 @@ void _showCompareStoresModal(BuildContext context, WidgetRef ref) {
                         return ListTile(
                           leading: isSelected ? const Icon(Icons.check) : const SizedBox(width: 24),
                           title: Text(q.displayName),
-                          trailing: Text(fmt.format(q.totalCents / 100)),
+                          trailing: Text(unitsFmt.formatCurrencySync(q.totalCents, settings: settings)),
                           onTap: () async {
                             final svc = ref.read(storeProfileServiceProvider);
                             await svc.setSelected(q.storeId ?? '');
@@ -861,11 +865,27 @@ class _AisleSummary {
 
 // ---------- Formatting helpers ----------
 
-String _formatQty(double qty, ing.Unit unit) {
+String _formatQty(double qty, ing.Unit unit, {WidgetRef? ref}) {
+  try {
+    if (ref != null) {
+      final settings = ref.watch(localeUnitsSettingsProvider).asData?.value;
+      if (settings != null) {
+        final f = ref.read(unitsFormatterProvider);
+        return f.formatQtySync(
+          qty: qty,
+          baseUnit: switch (unit) {
+            ing.Unit.grams => domain.Unit.grams,
+            ing.Unit.milliliters => domain.Unit.milliliters,
+            ing.Unit.piece => domain.Unit.piece,
+          },
+          settings: settings,
+          decimals: 1,
+        );
+      }
+    }
+  } catch (_) {}
   final rounded = (qty * 10).round() / 10.0;
-  final s = (rounded % 1 == 0)
-      ? rounded.toStringAsFixed(0)
-      : rounded.toStringAsFixed(1);
+  final s = (rounded % 1 == 0) ? rounded.toStringAsFixed(0) : rounded.toStringAsFixed(1);
   switch (unit) {
     case ing.Unit.grams:
       return '$s g';

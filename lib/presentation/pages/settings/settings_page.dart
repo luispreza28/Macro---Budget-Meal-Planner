@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/user_targets_providers.dart';
+import '../../../l10n/l10n.dart';
 import '../../providers/billing_providers.dart';
 import '../../../data/services/billing_service.dart';
 import '../../router/app_router.dart';
@@ -145,12 +146,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             );
           },
         ),
-        title: const Text('Settings'),
+        title: Text(AppLocalizations.of(context)?.settingsTitle ?? 'Settings'),
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
       body: ListView(
         children: [
+          // Localization & Units quick entry
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              leading: const Icon(Icons.language),
+              title: Text(AppLocalizations.of(context)?.localizationTitle ?? 'Language, Region & Units'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push(AppRouter.localizationUnits),
+            ),
+          ),
           // User Profile Section
           userTargetsAsync.when(
             loading: () => const _LoadingSection(),

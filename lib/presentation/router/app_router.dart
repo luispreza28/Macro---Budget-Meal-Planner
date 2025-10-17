@@ -10,6 +10,7 @@ import '../pages/shopping/shopping_list_page.dart';
 import '../pages/pantry/pantry_page.dart';
 import '../pages/settings/settings_page.dart';
 import '../pages/settings/store_profiles_page.dart';
+import '../pages/settings/localization_units_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
 import '../pages/insights/weekly_insights_page.dart';
 import '../pages/scan/barcode_scan_page.dart';
@@ -46,6 +47,7 @@ class AppRouter {
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
   static const String settings = '/settings';
+  static const String localizationUnits = '/settings/localization';
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
   static const String insights = '/insights';
@@ -100,6 +102,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const SettingsPage(),
+      ),
+    ),
+    GoRoute(
+      path: localizationUnits,
+      name: 'localization-units',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const LocalizationUnitsPage(),
       ),
     ),
     GoRoute(

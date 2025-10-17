@@ -10,6 +10,9 @@ import 'core/utils/performance_monitor.dart';
 import 'presentation/router/app_router.dart';
 import 'presentation/providers/database_providers.dart';
 import 'domain/services/reminder_scheduler.dart';
+import 'l10n/l10n.dart';
+import 'presentation/providers/locale_units_providers.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,14 +87,24 @@ class _MacroBudgetMealPlannerAppState
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
     final theme = ref.watch(appThemeProvider);
+    final localeAsync = ref.watch(localeProvider);
 
+    final t = AppLocalizations.of(context);
     return MaterialApp.router(
-      title: 'Macro + Budget Meal Planner',
+      title: t?.appTitle ?? 'Macro + Budget Meal Planner',
       theme: theme.lightTheme,
       darkTheme: theme.darkTheme,
       themeMode: ThemeMode.system,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: localeAsync.valueOrNull,
       builder: (context, child) {
         return child ?? const SizedBox.shrink();
       },

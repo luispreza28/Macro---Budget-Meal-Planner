@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../../domain/formatters/units_formatter.dart';
+import '../../../domain/services/locale_units_service.dart';
+import '../../providers/locale_units_providers.dart';
 import '../../../domain/entities/recipe.dart';
 import '../../providers/recipe_pref_providers.dart';
 import '../../../domain/services/recipe_features.dart';
@@ -237,7 +240,8 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                 final r = row.recipe;
                 final s = row.score;
                 final isFav = favs.contains(r.id);
-                final currencyFmt = NumberFormat.currency(symbol: '\$');
+                final settings = ref.watch(localeUnitsSettingsProvider).asData?.value ?? const LocaleUnitsSettings();
+                final unitsFmt = ref.read(unitsFormatterProvider);
                 final pantryPct = (s.coverageDelta * 100);
                 // Conflict badges
                 final violatesDiet = AllergenClassifier.violatesDiet(r, reqDiet);
@@ -319,8 +323,8 @@ class _SwapDrawerState extends ConsumerState<SwapDrawer> {
                             ),
                             _ImpactChip(
                               label: s.weeklyCostDeltaCents <= 0
-                                  ? '-${currencyFmt.format(s.weeklyCostDeltaCents.abs() / 100)} / wk'
-                                  : '+${currencyFmt.format(s.weeklyCostDeltaCents.abs() / 100)} / wk',
+                                  ? '-${unitsFmt.formatCurrencySync(s.weeklyCostDeltaCents.abs(), settings: settings)} / wk'
+                                  : '+${unitsFmt.formatCurrencySync(s.weeklyCostDeltaCents.abs(), settings: settings)} / wk',
                               isPositive: s.weeklyCostDeltaCents <= 0,
                               icon: Icons.attach_money,
                             ),

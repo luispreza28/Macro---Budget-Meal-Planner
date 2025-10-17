@@ -21,6 +21,9 @@ import '../../services/export_service.dart';
 import '../../services/export_service.dart' as svc;
 import '../../../domain/entities/ingredient.dart' as ing;
 import '../../../domain/value/shortfall_item.dart';
+import '../../../domain/formatters/units_formatter.dart';
+import '../../providers/locale_units_providers.dart';
+import '../../../l10n/l10n.dart';
 
 // NEW: watch ingredients so we can pass them into WeeklyPlanGrid
 import '../../providers/ingredient_providers.dart';
@@ -113,6 +116,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     return tempPlan.copyWith(totals: newTotals);
   }
 
+  String _fmtCents(WidgetRef ref, int cents) {
+    final s = ref.watch(localeUnitsSettingsProvider).asData?.value ?? const LocaleUnitsSettings();
+    final f = ref.read(unitsFormatterProvider);
+    return f.formatCurrencySync(cents, settings: s);
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentPlanAsync = ref.watch(currentPlanProvider);
@@ -122,7 +131,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Weekly Plan'),
+        title: Text(AppLocalizations.of(context)?.planCollections ?? 'Weekly Plan'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Navigator.of(context).canPop()
@@ -729,7 +738,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
     showDialog(
       context: context,
       builder: (dialogContext) => SimpleDialog(
-        title: const Text('Export Plan'),
+        title: Text(AppLocalizations.of(context)?.exportPlan ?? 'Export Plan'),
         children: [
           SimpleDialogOption(
             onPressed: () async {
@@ -1027,7 +1036,7 @@ class _BudgetHeader extends ConsumerWidget {
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        'Estimated: ${formatCents(vm.weeklyTotalCents)} / Budget: ${formatCents(vm.weeklyBudgetCents ?? 0)}',
+                        'Estimated: ${_fmtCents(ref, vm.weeklyTotalCents)} / Budget: ${_fmtCents(ref, vm.weeklyBudgetCents ?? 0)}',
                         style: Theme.of(context).textTheme.labelMedium,
                       ),
                     ],
@@ -1047,7 +1056,7 @@ class _BudgetHeader extends ConsumerWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        "You're ${formatCents(vm.overageCents!)} over this week. Try a cheaper plan?",
+                        "You're ${_fmtCents(ref, vm.overageCents!)} over this week. Try a cheaper plan?",
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Theme.of(context).colorScheme.onErrorContainer,
                             ),
