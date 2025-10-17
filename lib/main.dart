@@ -13,6 +13,7 @@ import 'domain/services/density_service.dart';
 import 'presentation/providers/database_providers.dart';
 import 'presentation/providers/cloud_sync_providers.dart';
 import 'domain/sync/auth_service.dart';
+import 'presentation/providers/reminder_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -63,6 +64,8 @@ void main() async {
       _maybeDailyBackup(container);
       // Start auto-backup listener for plan saves
       container.read(autoBackupOnLatestPlanProvider);
+      // Start reminder auto-rescheduler (listens to plan changes)
+      container.read(reminderAutoReschedulerProvider);
     });
 
     AppLogger.i('Application launched successfully');
@@ -134,3 +137,4 @@ class _MacroBudgetMealPlannerAppState
     );
   }
 }
+

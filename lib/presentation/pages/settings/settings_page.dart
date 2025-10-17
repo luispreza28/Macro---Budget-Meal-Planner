@@ -16,6 +16,7 @@ import '../../providers/nutrition_lookup_providers.dart';
 import '../../../domain/services/nutrition_lookup_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'micros_settings_page.dart';
+import 'reminders_page.dart';
 
 /// Comprehensive settings page with all user preferences and app configuration
 class SettingsPage extends ConsumerStatefulWidget {
@@ -476,10 +477,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.schedule),
-                  title: const Text('Meal Reminders'),
-                  subtitle: const Text('Set reminder times'),
+                  title: const Text('Reminders & Widgets'),
+                  subtitle: const Text('Manage schedules, snooze, widget'),
                   trailing: const Icon(Icons.arrow_forward_ios),
-                  onTap: _showFeatureNotImplemented,
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const RemindersSettingsPage()),
+                    );
+                  },
                 ),
               ],
             ),
