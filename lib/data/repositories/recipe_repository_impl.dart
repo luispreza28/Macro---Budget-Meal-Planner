@@ -259,6 +259,21 @@ class RecipeRepositoryImpl implements RecipeRepository {
   }
 
   @override
+  Future<void> upsertFromJson(Map<String, dynamic> json) async {
+    try {
+      final entity = domain.Recipe.fromJson(json);
+      final exists = await recipeExists(entity.id);
+      if (!exists) {
+        await addRecipe(entity);
+      } else {
+        await updateRecipe(entity);
+      }
+    } catch (_) {
+      // Ignore malformed import rows
+    }
+  }
+
+  @override
   Future<int> getRecipesCount() async {
     final res = await (_db.selectOnly(_db.recipes)
           ..addColumns([_db.recipes.id.count()]))

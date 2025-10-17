@@ -204,6 +204,21 @@ class IngredientRepositoryImpl implements IngredientRepository {
     }
   }
 
+  @override
+  Future<void> upsertFromJson(Map<String, dynamic> json) async {
+    try {
+      final entity = domain.Ingredient.fromJson(json);
+      final exists = await ingredientExists(entity.id);
+      if (!exists) {
+        await addIngredient(entity);
+      } else {
+        await updateIngredient(entity);
+      }
+    } catch (_) {
+      // Best-effort import; ignore malformed rows
+    }
+  }
+
   /// Maps database row to domain entity
   domain.Ingredient _mapToEntity(Ingredient data) {
     return domain.Ingredient(

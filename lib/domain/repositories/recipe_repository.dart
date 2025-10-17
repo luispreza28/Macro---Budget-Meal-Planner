@@ -76,4 +76,7 @@ abstract class RecipeRepository {
 
   /// Watch recipes for diet (reactive stream)
   Stream<List<Recipe>> watchRecipesForDiet(List<String> dietFlags);
+
+  /// Upsert a recipe from a JSON map (export/import compatible)
+  Future<void> upsertFromJson(Map<String, dynamic> json);
 }

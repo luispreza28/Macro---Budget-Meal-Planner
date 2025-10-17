@@ -194,6 +194,26 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                 ),
               ),
               PopupMenuItem(
+                value: 'saveTemplate',
+                child: Row(
+                  children: [
+                    Icon(Icons.save_outlined),
+                    SizedBox(width: 8),
+                    Text('Save as Template'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'collections',
+                child: Row(
+                  children: [
+                    Icon(Icons.collections_bookmark_outlined),
+                    SizedBox(width: 8),
+                    Text('Collections'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
                 value: 'export',
                 child: Row(
                   children: [
@@ -214,6 +234,12 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                   break;
                 case 'multiweek':
                   context.go(AppRouter.multiweek);
+                  break;
+                case 'collections':
+                  context.go(AppRouter.collections);
+                  break;
+                case 'saveTemplate':
+                  context.go(AppRouter.collections);
                   break;
                 case 'export':
                   final plan = currentPlanAsync.asData?.value;
@@ -498,6 +524,8 @@ class _PlanPageState extends ConsumerState<PlanPage> {
       ),
     );
   }
+
+  
 
   // Phase banner widget
 }

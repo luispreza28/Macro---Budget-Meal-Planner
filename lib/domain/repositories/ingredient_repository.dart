@@ -62,4 +62,7 @@ abstract class IngredientRepository {
     double packQty = 0,
     int? packPriceCents,
   });
+
+  /// Upsert an ingredient from a JSON map (export/import compatible)
+  Future<void> upsertFromJson(Map<String, dynamic> json);
 }
