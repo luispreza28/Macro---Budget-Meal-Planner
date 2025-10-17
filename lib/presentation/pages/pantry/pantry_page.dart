@@ -11,6 +11,9 @@ import '../../../domain/services/pantry_expiry_service.dart';
 import '../../../domain/services/waste_log_service.dart';
 import '../../providers/ingredient_providers.dart';
 import '../../providers/pantry_expiry_providers.dart';
+import '../../providers/database_providers.dart';
+import '../../../domain/services/replenishment_prefs_service.dart';
+import 'par_editor_sheet.dart';
 import 'pantry_item_editor_sheet.dart';
 import 'waste_insights_card.dart';
 
@@ -171,6 +174,60 @@ class _PantryListTile extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('${_fmtQty(item.qty)} ${item.unit.value}'),
+            // Par indicator (on-hand vs par)
+            Builder(builder: (context) {
+              final ing = ingAsync.asData?.value;
+              if (ing == null) return const SizedBox.shrink();
+              return FutureBuilder(
+                future: Future.wait([
+                  ref.read(replenishmentPrefsServiceProvider).get(ing.id),
+                  ref.read(pantryRepositoryProvider).getOnHand(),
+                ]),
+                builder: (ctx, snap) {
+                  if (!snap.hasData) return const SizedBox.shrink();
+                  final pref = (snap.data![0]) as ReplenishPref?;
+                  final onHand = (snap.data![1]
+                              as Map<String, ({double qty, domain.Unit unit})>)[ing.id]
+                          ?.qty ??
+                      0.0;
+                  if (pref == null || pref.parQty <= 0) return const SizedBox.shrink();
+                  final pct = (onHand / pref.parQty).clamp(0, 1.0);
+                  final below = onHand < pref.parQty;
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4.0, bottom: 2.0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              minHeight: 6,
+                              value: pct.isFinite ? pct : 0,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (below)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.tertiaryContainer,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'Below par',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(color: Theme.of(context).colorScheme.onTertiaryContainer),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            }),
             Row(children: [
               if (item.openedAt != null) _Badge(label: 'Opened'),
               if (soon) _Badge(label: 'Use soon'),
@@ -397,4 +454,3 @@ class _EmptyView extends StatelessWidget {
     );
   }
 }
-

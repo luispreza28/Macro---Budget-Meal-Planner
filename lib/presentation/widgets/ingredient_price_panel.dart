@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import '../../domain/services/price_history_service.dart';
 import '../providers/price_providers.dart';
 import '../providers/store_providers.dart';
+import '../providers/ingredient_providers.dart';
+import '../pages/pantry/par_editor_sheet.dart';
 
 class IngredientPricePanel extends ConsumerWidget {
   const IngredientPricePanel({super.key, required this.ingredientId, this.selectedStoreId});
@@ -23,7 +25,27 @@ class IngredientPricePanel extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Prices', style: Theme.of(context).textTheme.titleMedium),
+            Row(
+              children: [
+                Expanded(child: Text('Prices', style: Theme.of(context).textTheme.titleMedium)),
+                IconButton(
+                  tooltip: 'Par Level',
+                  icon: const Icon(Icons.auto_awesome),
+                  onPressed: () async {
+                    // Try get ingredient from profiles store? We only have id; defer to global providers.
+                    final ing = await ref.read(ingredientByIdProvider(ingredientId).future);
+                    if (ing != null && context.mounted) {
+                      await showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        showDragHandle: true,
+                        builder: (_) => ParEditorSheet(ingredient: ing),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
             const SizedBox(height: 6),
             profilesAsync.when(
               loading: () => const SizedBox.shrink(),
@@ -133,4 +155,3 @@ class _SparklinePainter extends CustomPainter {
   bool shouldRepaint(covariant _SparklinePainter oldDelegate) =>
       oldDelegate.values != values;
 }
-

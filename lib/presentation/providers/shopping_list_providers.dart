@@ -8,6 +8,7 @@ import '../providers/recipe_providers.dart';
 import '../providers/ingredient_providers.dart';
 import '../providers/sub_rules_providers.dart';
 import 'dart:convert';
+import '../../domain/services/shopping_extras_service.dart';
 
 class AggregatedShoppingItem {
   AggregatedShoppingItem({
@@ -224,7 +225,7 @@ Future<List<_Extra>> _loadExtrasForPlan(Ref ref, String planId) async {
   if (raw == null || raw.isEmpty) return const [];
   try {
     final list = jsonDecode(raw) as List<dynamic>;
-    return list.map((e) {
+    final legacy = list.map((e) {
       final m = e as Map<String, dynamic>;
       return _Extra(
         ingredientId: m['ingredientId'] as String,
@@ -235,8 +236,24 @@ Future<List<_Extra>> _loadExtrasForPlan(Ref ref, String planId) async {
         qty: (m['qty'] as num).toDouble(),
       );
     }).toList();
+    // Also merge v1 extras from ShoppingExtrasService
+    final svc = ref.read(shoppingExtrasServiceProvider);
+    final v1 = await svc.list(planId);
+    final mapped = v1
+        .map((x) => _Extra(ingredientId: x.ingredientId, unit: x.unit, qty: x.qty))
+        .toList();
+    return [...legacy, ...mapped];
   } catch (_) {
-    return const [];
+    try {
+      // best-effort: still include v1 extras
+      final svc = ref.read(shoppingExtrasServiceProvider);
+      final v1 = await svc.list(planId);
+      return v1
+          .map((x) => _Extra(ingredientId: x.ingredientId, unit: x.unit, qty: x.qty))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
   }
 }
 

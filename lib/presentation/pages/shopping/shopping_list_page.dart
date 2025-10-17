@@ -34,6 +34,7 @@ import '../../../domain/entities/store_profile.dart';
 import '../../../domain/services/split_shopping_prefs.dart';
 import '../../providers/split_shopping_providers.dart';
 import 'best_buys_card.dart';
+import 'restock_suggestions_card.dart';
 // Price history & analytics
 import '../../../domain/services/price_history_service.dart';
 import '../../../domain/services/price_analytics_service.dart';
@@ -257,6 +258,8 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
               ),
               // Best Buys card
               const BestBuysCard(),
+              // Restock Suggestions
+              if (plan != null) RestockSuggestionsCard(plan: plan),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
                 child: Row(
