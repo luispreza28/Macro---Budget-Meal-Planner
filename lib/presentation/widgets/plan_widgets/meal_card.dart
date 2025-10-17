@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../domain/entities/recipe.dart';
+import "package:go_router/go_router.dart";
 import '../../../domain/entities/ingredient.dart'; // Unit & Ingredient here\r\n\r\nconst bool kShowPantryBadges = false; // gate pantry badges
 import '../../providers/diet_allergen_providers.dart';
 
@@ -152,6 +153,21 @@ class MealCard extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        // ignore: use_build_context_synchronously
+                        context.push('/cook/${recipe.id}');
+                      },
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Cook'),
+                    ),
+                  ),
+                ),
 
                 // Time & cost
                 Row(
@@ -329,14 +345,7 @@ class MealCard extends ConsumerWidget {
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('Done'),
-                    ),
-                  ),
-                ),
+                  child: Row( children: [ Expanded(child: OutlinedButton.icon(onPressed: () { Navigator.of(ctx).pop(); if (context.mounted) { context.push('/cook/'); } }, icon: const Icon(Icons.play_arrow), label: const Text('Cook')), ), const SizedBox(width: 12), Expanded(child: FilledButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Done'))), ], ),),
               ],
             ),
           ),
@@ -468,4 +477,5 @@ class _SimpleSheetMessage extends StatelessWidget {
     );
   }
 }
+
 

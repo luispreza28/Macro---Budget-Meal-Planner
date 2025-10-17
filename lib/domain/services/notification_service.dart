@@ -123,5 +123,38 @@ class NotificationService {
       print('[Reminders] canceled all');
     }
   }
+
+  Future<void> scheduleIn({
+    required int id,
+    required Duration delay,
+    required String title,
+    required String body,
+    String? payload,
+    String androidChannelId = 'reminders',
+    String androidChannelName = 'Reminders',
+  }) async {
+    final when = DateTime.now().add(delay);
+    await _plugin.schedule(
+      id,
+      title,
+      body,
+      when,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          androidChannelId,
+          androidChannelName,
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: const DarwinNotificationDetails(),
+      ),
+      payload: payload,
+      androidAllowWhileIdle: true,
+    );
+    if (kDebugMode) {
+      // ignore: avoid_print
+      print('[Notifications] scheduled one-shot id=$id in ${delay.inSeconds}s');
+    }
+  }
 }
 

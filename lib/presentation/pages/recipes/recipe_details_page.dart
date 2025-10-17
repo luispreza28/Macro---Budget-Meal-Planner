@@ -9,6 +9,7 @@ import '../../../domain/entities/ingredient.dart' as domain;
 import '../../../domain/entities/recipe.dart';
 import '../../../data/services/recipe_calculator.dart';
 import '../../../domain/services/recipe_math.dart';
+import "package:go_router/go_router.dart";
 import '../../providers/ingredient_providers.dart';
 import '../../providers/recipe_providers.dart';
 import '../../providers/shortfall_providers.dart';
@@ -107,6 +108,9 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
             onPressed: _hasUnsavedChanges
                 ? () => _onSavePressed(recipeAsync, ingredientsAsync)
                 : null,
+          ),\n  onPressed: () {\n    if (!mounted) return;\n\n  },\n),
+            onPressed: () {
+              if (!mounted) return;
           ),
         ],
       ),
@@ -1856,3 +1860,10 @@ String _formatNumber(double value, {int decimals = 1}) {
   }
   return formatted;
 }
+
+
+
+
+
+
+
