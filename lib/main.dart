@@ -20,6 +20,8 @@ import 'domain/services/reminder_scheduler.dart';
 import 'l10n/l10n.dart';
 import 'presentation/providers/locale_units_providers.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'presentation/providers/offline_daemon_provider.dart';
+import 'presentation/widgets/offline_banner.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -103,6 +105,12 @@ class MacroBudgetMealPlannerApp extends ConsumerStatefulWidget {
 class _MacroBudgetMealPlannerAppState
     extends ConsumerState<MacroBudgetMealPlannerApp> {
   @override
+  void initState() {
+    super.initState();
+    // Start offline daemon once
+    ref.read(offlineDaemonProvider);
+  }
+  @override
   void dispose() {
     AppLifecycleManager.dispose();
     PerformanceMonitor.dispose();
@@ -158,12 +166,25 @@ class _MacroBudgetMealPlannerAppState
           data: baseTheme.copyWith(textTheme: withMinSizes(baseTheme.textTheme)),
           child: child ?? const SizedBox.shrink(),
         );
-        return MediaQuery(
+        final mediaWrapped = MediaQuery(
           data: mq.copyWith(
             textScaleFactor: combined.clamp(1.0, 1.6),
             highContrast: effectiveHighContrast,
           ),
           child: themedChild,
+        );
+        // Overlay a persistent offline banner at the top
+        return Stack(
+          children: [
+            mediaWrapped,
+            // Safe area to avoid status bar
+            const Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: SafeArea(top: true, bottom: false, child: OfflineBanner()),
+            ),
+          ],
         );
       },
     );

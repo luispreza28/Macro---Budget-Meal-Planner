@@ -23,6 +23,7 @@ import '../providers/database_providers.dart';
 import '../pages/feedback/feedback_form_page.dart';
 import '../pages/feedback/diagnostics_preview_page.dart';
 import '../pages/feedback/feedback_outbox_page.dart';
+import '../pages/offline/queued_actions_page.dart';
 
 /// SharedPreferences flag for onboarding completion (v1)
 const kOnboardingDone = 'onboarding.done.v1';
@@ -67,6 +68,7 @@ class AppRouter {
   static const String feedbackNew = '/feedback/new';
   static const String feedbackPreview = '/feedback/preview';
   static const String feedbackOutbox = '/feedback/outbox';
+  static const String offlineQueued = '/offline/queued';
 
   static final List<GoRoute> _routes = [
     GoRoute(
@@ -225,6 +227,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const FeedbackOutboxPage(),
+      ),
+    ),
+    GoRoute(
+      path: offlineQueued,
+      name: 'offline-queued',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const QueuedActionsPage(),
       ),
     ),
   ];

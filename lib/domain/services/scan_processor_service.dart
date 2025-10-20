@@ -8,6 +8,7 @@ import '../../domain/entities/ingredient.dart' as domain;
 import 'scan_queue_service.dart';
 import 'sku_mapping_service.dart';
 import 'price_history_service.dart';
+import 'offline_center.dart';
 
 final scanProcessorServiceProvider =
     Provider<ScanProcessorService>((ref) => ScanProcessorService(ref));
@@ -38,26 +39,42 @@ class ScanProcessorService {
       }
 
       // If we have price & pack & store, update Price History as PPU for this store
-      if (online &&
-          item.priceCents != null &&
-          item.packQty != null &&
-          item.packQty! > 0 &&
-          item.storeId != null) {
+      final hasPriceData = item.priceCents != null && item.packQty != null && item.packQty! > 0 && item.storeId != null;
+      if (hasPriceData) {
         final ppuCents = (item.priceCents! / item.packQty!).round();
-        // Write locally regardless of online status; could sync upstream later.
-        await ref.read(priceHistoryServiceProvider).add(
-              PricePoint(
-                id: const Uuid().v4(),
-                ingredientId: ingId,
-                storeId: item.storeId!,
-                ppuCents: ppuCents,
-                unit: item.packUnit ?? 'g',
-                at: DateTime.now(),
-                source: 'scan',
-              ),
-            );
-        if (kDebugMode) {
-          debugPrint('[Scan] price push ${item.ean} ppu=$ppuCents to store=${item.storeId} online=$online');
+        if (online) {
+          // Persist locally now as source of truth
+          await ref.read(priceHistoryServiceProvider).add(
+                PricePoint(
+                  id: const Uuid().v4(),
+                  ingredientId: ingId,
+                  storeId: item.storeId!,
+                  ppuCents: ppuCents,
+                  unit: item.packUnit ?? 'g',
+                  at: DateTime.now(),
+                  source: 'scan',
+                ),
+              );
+          if (kDebugMode) {
+            debugPrint('[Scan] price push ${item.ean} ppu=$ppuCents to store=${item.storeId} online=$online');
+          }
+        } else {
+          // Enqueue for later when offline
+          await ref.read(offlineCenterProvider).enqueue(
+                OfflineTaskType.priceHistoryPush,
+                dedupeKey: 'price:$ingId:${item.storeId}:${DateTime.now().millisecondsSinceEpoch}',
+                payload: {
+                  'ingredientId': ingId,
+                  'storeId': item.storeId!,
+                  'ppuCents': ppuCents,
+                  'unit': item.packUnit ?? 'g',
+                  'atIso': DateTime.now().toIso8601String(),
+                  'source': 'scan',
+                },
+              );
+          if (kDebugMode) {
+            debugPrint('[Scan] queued price push ${item.ean} ppu=$ppuCents to store=${item.storeId}');
+          }
         }
       }
 
