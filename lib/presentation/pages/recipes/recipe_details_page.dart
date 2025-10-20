@@ -24,9 +24,10 @@ import '../../providers/diet_allergen_providers.dart';
 import '../../../domain/services/allergen_classifier.dart';
 
 class RecipeDetailsPage extends ConsumerStatefulWidget {
-  const RecipeDetailsPage({super.key, required this.recipeId});
+  const RecipeDetailsPage({super.key, required this.recipeId, this.initialDraft});
 
   final String recipeId;
+  final Recipe? initialDraft;
 
   @override
   ConsumerState<RecipeDetailsPage> createState() => _RecipeDetailsPageState();
@@ -119,17 +120,14 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
         error: (error, _) =>
             Center(child: Text('Failed to load recipe: $error')),
         data: (recipe) {
-          if (recipe == null) {
-            return const Center(child: Text('Recipe not found'));
-          }
-
+          final providedDraft = widget.initialDraft;
           if (!_initialized) {
-            _original = recipe;
-            _draft = recipe;
+            _original = recipe ?? providedDraft;
+            _draft = recipe ?? providedDraft;
             _initialized = true;
             _hasUnsavedChanges = false;
             _preview = null;
-          } else if (!_hasUnsavedChanges && _original != recipe) {
+          } else if (!_hasUnsavedChanges && (recipe != null) && _original != recipe) {
             _original = recipe;
             _draft = recipe;
             _hasUnsavedChanges = false;
@@ -554,7 +552,7 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
     AsyncValue<Recipe?> recipeAsync,
     AsyncValue<List<domain.Ingredient>> ingredientsAsync,
   ) async {
-    final original = recipeAsync.value;
+    final original = recipeAsync.value ?? widget.initialDraft;
     final draft = _draft;
     if (original == null || draft == null) {
       return;
@@ -589,7 +587,10 @@ class _RecipeDetailsPageState extends ConsumerState<RecipeDetailsPage> {
     );
 
     final notifier = ref.read(recipeNotifierProvider.notifier);
-    if (draft.id != original.id) {
+    // If the recipe does not exist in DB yet, add; otherwise, update.
+    final repo = ref.read(recipeRepositoryProvider);
+    final exists = await repo.recipeExists(updatedRecipe.id);
+    if (!exists) {
       await notifier.addRecipe(updatedRecipe);
     } else {
       await notifier.updateRecipe(updatedRecipe);

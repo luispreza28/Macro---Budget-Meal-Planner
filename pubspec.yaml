@@ -51,6 +51,11 @@ dependencies:
   device_info_plus: ^11.0.0
   screenshot: ^2.1.0
   image_picker: ^1.1.2
+  file_picker: ^8.1.2
+  google_mlkit_text_recognition: ^0.13.0
+  native_pdf_renderer: ^6.0.1
+  collection: ^1.18.0
+  quiver: ^3.2.1
 
   # Optional Firebase upload for feedback (add in your env if needed)
   # cloud_firestore: ^5.x.x

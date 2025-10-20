@@ -14,6 +14,7 @@ import '../pages/settings/telemetry_settings_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/settings/localization_units_page.dart';
 import '../pages/recipes/recipe_details_page.dart';
+import '../pages/import/recipe_import_page.dart';
 import '../pages/cook/cook_mode_page.dart';
 import '../pages/insights/weekly_insights_page.dart';
 import '../pages/scan/barcode_scan_page.dart';
@@ -60,6 +61,7 @@ class AppRouter {
   static const String localizationUnits = '/settings/localization';
   static const String storeProfiles = '/settings/store-profiles';
   static const String recipeDetails = '/recipe/:id';
+  static const String importRecipe = '/import/recipe';
   static const String cook = '/cook/:recipeId';
   static const String insights = '/insights';
   static const String scan = '/scan';
@@ -150,7 +152,16 @@ class AppRouter {
         key: state.pageKey,
         child: RecipeDetailsPage(
           recipeId: state.pathParameters['id']!,
+          initialDraft: state.extra is Object ? state.extra as dynamic : null,
         ),
+      ),
+    ),
+    GoRoute(
+      path: importRecipe,
+      name: 'import-recipe',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const RecipeImportPage(),
       ),
     ),
     GoRoute(
