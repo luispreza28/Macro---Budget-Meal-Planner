@@ -561,6 +561,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 16),
 
+          // Support & Feedback
+          _buildSectionHeader('Support'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.bug_report_outlined),
+                  title: const Text('Report a problem'),
+                  subtitle: const Text('Send feedback with diagnostics'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/feedback/new'),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.outbox_outlined),
+                  title: const Text('Feedback Outbox'),
+                  subtitle: const Text('View or delete saved drafts'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/feedback/outbox'),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Reminders Section
           _buildSectionHeader('Reminders'),
           if (_loadingReminders)

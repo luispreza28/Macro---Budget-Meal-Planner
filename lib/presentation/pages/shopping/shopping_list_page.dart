@@ -111,11 +111,14 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                 context.push('/scanner/batch');
               } else if (v == 'queue') {
                 context.push('/scanner/queue');
+              } else if (v == 'feedback') {
+                context.push('/feedback/new');
               }
             },
             itemBuilder: (ctx) => [
               const PopupMenuItem(value: 'batch', child: Text('Batch Scan (prices)')),
               const PopupMenuItem(value: 'queue', child: Text('Scan Queue')),
+              const PopupMenuItem(value: 'feedback', child: Text('Send feedback')),
             ],
           ),
         ],

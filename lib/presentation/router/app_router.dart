@@ -19,6 +19,9 @@ import '../pages/scan/barcode_scan_page.dart';
 import '../pages/scanner/batch_scanner_page.dart';
 import '../pages/scanner/scan_queue_page.dart';
 import '../providers/database_providers.dart';
+import '../pages/feedback/feedback_form_page.dart';
+import '../pages/feedback/diagnostics_preview_page.dart';
+import '../pages/feedback/feedback_outbox_page.dart';
 
 /// SharedPreferences flag for onboarding completion (v1)
 const kOnboardingDone = 'onboarding.done.v1';
@@ -58,6 +61,9 @@ class AppRouter {
   static const String scan = '/scan';
   static const String scannerBatch = '/scanner/batch';
   static const String scannerQueue = '/scanner/queue';
+  static const String feedbackNew = '/feedback/new';
+  static const String feedbackPreview = '/feedback/preview';
+  static const String feedbackOutbox = '/feedback/outbox';
 
   static final List<GoRoute> _routes = [
     GoRoute(
@@ -182,6 +188,32 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const TelemetrySettingsPage(),
+      ),
+    ),
+    GoRoute(
+      path: feedbackNew,
+      name: 'feedback-new',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const FeedbackFormPage(),
+      ),
+    ),
+    GoRoute(
+      path: feedbackPreview,
+      name: 'feedback-preview',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: DiagnosticsPreviewPage(
+          draft: (state.extra) as dynamic,
+        ),
+      ),
+    ),
+    GoRoute(
+      path: feedbackOutbox,
+      name: 'feedback-outbox',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const FeedbackOutboxPage(),
       ),
     ),
   ];

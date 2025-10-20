@@ -180,6 +180,16 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                   ],
                 ),
               ),
+              PopupMenuItem(
+                value: 'feedback',
+                child: Row(
+                  children: [
+                    Icon(Icons.bug_report_outlined),
+                    SizedBox(width: 8),
+                    Text('Send feedback'),
+                  ],
+                ),
+              ),
             ],
             onSelected: (value) {
               switch (value) {
@@ -212,6 +222,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                   };
 
                   _showExportChooser(plan, recipeMap, ingredientMap);
+                  break;
+                case 'feedback':
+                  context.push('/feedback/new');
                   break;
               }
             },
