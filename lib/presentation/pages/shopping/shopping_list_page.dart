@@ -165,7 +165,9 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
               )
               .toList();
 
-          return Column(
+          return FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
@@ -318,6 +320,7 @@ class _ShoppingListPageState extends ConsumerState<ShoppingListPage> {
                 ),
               ),
             ],
+          ),
           );
         },
       ),
@@ -510,9 +513,13 @@ class _AisleSection extends StatelessWidget {
               return ListTile(
                 dense: true,
                 tileColor: flagged ? Theme.of(context).colorScheme.errorContainer.withOpacity(0.12) : null,
-                leading: Checkbox.adaptive(
-                  value: checked,
-                  onChanged: (_) => toggleChecked(it),
+                leading: Semantics(
+                  checked: checked,
+                  label: 'Bought '+name+' '+qtyStr,
+                  child: Checkbox.adaptive(
+                    value: checked,
+                    onChanged: (_) => toggleChecked(it),
+                  ),
                 ),
                 title: Text(
                   name,
@@ -562,6 +569,10 @@ class _AisleSection extends StatelessWidget {
                   ],
                 ),
                 onTap: () => toggleChecked(it),
+                // Provide a tap hint for screen readers
+                // ignore: deprecated_member_use
+                // (onTapHint on Semantics uses deprecated API in some SDKs; kept minimal)
+                // A wrapping Semantics around ListTile would interfere with ListTile semantics; use hint via Tooltip-like pattern if needed.
               );
             },
           ),

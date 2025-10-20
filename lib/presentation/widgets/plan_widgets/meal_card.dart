@@ -70,17 +70,21 @@ class MealCard extends ConsumerWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       elevation: isSelected ? 4 : 1,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          decoration: isSelected
-              ? BoxDecoration(
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.primary,
-                    width: 2,
-                  ),
-                )
-              : null,
+      child: Semantics(
+        label: '${recipe.name}, ${recipe.macrosPerServ.kcal.toStringAsFixed(0)} kilocalories per serving, \$${(recipe.costPerServCents / 100).toStringAsFixed(2)} per serving',
+        button: true,
+        hint: 'Open meal details',
+        child: InkWell(
+          onTap: onTap,
+          child: Container(
+            decoration: isSelected
+                ? BoxDecoration(
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 2,
+                    ),
+                  )
+                : null,
           child: Stack(
             children: [
               if (dietMismatch || allergenConflict)
@@ -142,11 +146,16 @@ class MealCard extends ConsumerWidget {
                     ],
                     if (onInfoTap != null) ...[
                       const SizedBox(width: 6),
-                      IconButton(
-                        tooltip: 'Details',
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.info_outline, size: 18),
-                        onPressed: onInfoTap,
+                      Semantics(
+                        label: 'Open meal details',
+                        button: true,
+                        child: IconButton(
+                          tooltip: 'Details',
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                          icon: const Icon(Icons.info_outline, size: 18),
+                          onPressed: onInfoTap,
+                        ),
                       ),
                     ],
                   ],
@@ -248,6 +257,7 @@ class MealCard extends ConsumerWidget {
             ),
               ),
             ],
+          ),
           ),
         ),
       ),

@@ -264,7 +264,9 @@ class _PlanPageState extends ConsumerState<PlanPage> {
 
                       return Stack(
                         children: [
-                          Column(
+                          FocusTraversalGroup(
+                            policy: OrderedTraversalPolicy(),
+                            child: Column(
                             children: [
                               // Totals bar
                               TotalsBar(
@@ -310,6 +312,7 @@ class _PlanPageState extends ConsumerState<PlanPage> {
                                 ),
                               ),
                             ],
+                            ),
                           ),
 
                           // Swap drawer

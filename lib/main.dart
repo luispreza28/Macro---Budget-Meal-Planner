@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'domain/services/telemetry_settings_service.dart';
 import 'domain/services/telemetry_service.dart';
 import 'presentation/providers/telemetry_observer.dart';
+import 'presentation/providers/accessibility_providers.dart';
+import 'presentation/theme/high_contrast_theme.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/errors/error_handler.dart';
@@ -113,6 +115,8 @@ class _MacroBudgetMealPlannerAppState
     final router = ref.watch(appRouterProvider);
     final theme = ref.watch(appThemeProvider);
     final localeAsync = ref.watch(localeProvider);
+    final textScaleAsync = ref.watch(a11yTextScaleProvider);
+    final a11yAsync = ref.watch(a11ySettingsProvider);
 
     final t = AppLocalizations.of(context);
     return MaterialApp.router(
@@ -120,6 +124,8 @@ class _MacroBudgetMealPlannerAppState
       theme: theme.lightTheme,
       darkTheme: theme.darkTheme,
       themeMode: ThemeMode.system,
+      highContrastTheme: buildHighContrastLight(),
+      highContrastDarkTheme: ThemeData.dark(useMaterial3: true),
       routerConfig: router,
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
@@ -131,7 +137,34 @@ class _MacroBudgetMealPlannerAppState
       supportedLocales: AppLocalizations.supportedLocales,
       locale: localeAsync.valueOrNull,
       builder: (context, child) {
-        return child ?? const SizedBox.shrink();
+        final preset = textScaleAsync.valueOrNull ?? 1.0;
+        final mq = MediaQuery.of(context);
+        final system = mq.textScaleFactor;
+        final combined = (preset == 1.0) ? system : (system * preset);
+        final a11y = a11yAsync.valueOrNull;
+        final effectiveHighContrast = mq.highContrast || (a11y?.highContrast == true);
+        final baseTheme = Theme.of(context);
+        final txt = baseTheme.textTheme;
+        TextTheme withMinSizes(TextTheme b) {
+          return b.copyWith(
+            bodyMedium: (b.bodyMedium ?? txt.bodyMedium)?.copyWith(fontSize: (b.bodyMedium?.fontSize ?? txt.bodyMedium?.fontSize ?? 16).clamp(16, double.infinity)),
+            bodyLarge: (b.bodyLarge ?? txt.bodyLarge)?.copyWith(fontSize: (b.bodyLarge?.fontSize ?? txt.bodyLarge?.fontSize ?? 18).clamp(16, double.infinity)),
+            titleMedium: (b.titleMedium ?? txt.titleMedium)?.copyWith(fontSize: (b.titleMedium?.fontSize ?? txt.titleMedium?.fontSize ?? 20).clamp(20, double.infinity)),
+            titleLarge: (b.titleLarge ?? txt.titleLarge)?.copyWith(fontSize: (b.titleLarge?.fontSize ?? txt.titleLarge?.fontSize ?? 22).clamp(20, double.infinity)),
+            labelLarge: (b.labelLarge ?? txt.labelLarge)?.copyWith(fontSize: (b.labelLarge?.fontSize ?? txt.labelLarge?.fontSize ?? 16).clamp(16, double.infinity)),
+          );
+        }
+        final themedChild = Theme(
+          data: baseTheme.copyWith(textTheme: withMinSizes(baseTheme.textTheme)),
+          child: child ?? const SizedBox.shrink(),
+        );
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaleFactor: combined.clamp(1.0, 1.6),
+            highContrast: effectiveHighContrast,
+          ),
+          child: themedChild,
+        );
       },
     );
   }

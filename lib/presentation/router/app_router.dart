@@ -9,6 +9,7 @@ import '../pages/plan/plan_page.dart';
 import '../pages/shopping/shopping_list_page.dart';
 import '../pages/pantry/pantry_page.dart';
 import '../pages/settings/settings_page.dart';
+import '../pages/settings/accessibility_page.dart';
 import '../pages/settings/telemetry_settings_page.dart';
 import '../pages/settings/store_profiles_page.dart';
 import '../pages/settings/localization_units_page.dart';
@@ -51,6 +52,8 @@ class AppRouter {
   static const String plan = '/plan';
   static const String shoppingList = '/shopping-list';
   static const String pantry = '/pantry';
+  static const String settings = '/settings';
+  static const String accessibilitySettings = '/settings/accessibility';
 
   static const String telemetrySettings = '/settings/telemetry';
   static const String localizationUnits = '/settings/localization';
@@ -112,6 +115,14 @@ class AppRouter {
       pageBuilder: (context, state) => MaterialPage<void>(
         key: state.pageKey,
         child: const SettingsPage(),
+      ),
+    ),
+    GoRoute(
+      path: accessibilitySettings,
+      name: 'settings-accessibility',
+      pageBuilder: (context, state) => MaterialPage<void>(
+        key: state.pageKey,
+        child: const AccessibilityPage(),
       ),
     ),
     GoRoute(

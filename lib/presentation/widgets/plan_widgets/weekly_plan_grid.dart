@@ -297,10 +297,13 @@ class _MealsRow extends StatelessWidget {
                           Positioned(
                             top: 2,
                             right: 2,
-                            child: IconButton(
-                              tooltip: pinned ? 'Unpin' : 'Pin',
-                              icon: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined, size: 18),
-                              onPressed: () async {
+                            child: Semantics(
+                              label: pinned ? 'Unpin meal' : 'Pin meal',
+                              button: true,
+                              child: IconButton(
+                                tooltip: pinned ? 'Unpin' : 'Pin',
+                                icon: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined, size: 18),
+                                onPressed: () async {
                                 final svc = ref.read(planPinServiceProvider);
                                 if (pinned) {
                                   await svc.clearPin(planId: planId, slotKey: slotKey);
@@ -308,7 +311,8 @@ class _MealsRow extends StatelessWidget {
                                   await svc.setPin(planId: planId, slotKey: slotKey, recipeId: recipe.id);
                                 }
                                 ref.invalidate(pinsForCurrentPlanProvider);
-                              },
+                                },
+                              ),
                             ),
                           ),
                         ],

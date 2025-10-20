@@ -503,6 +503,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           _buildSectionHeader('Accessibility'),
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: ListTile(
+              leading: const Icon(Icons.accessibility_new),
+              title: const Text('Accessibility Settings'),
+              subtitle: const Text('Text size, contrast, motion, haptics'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push(AppRouter.accessibilitySettings),
+            ),
+          ),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: [
                 SwitchListTile(

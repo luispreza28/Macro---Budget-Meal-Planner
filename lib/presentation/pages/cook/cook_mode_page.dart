@@ -13,6 +13,7 @@ import '../../providers/recipe_providers.dart';
 import '../../providers/cook_session_providers.dart';
 import '../../providers/cook_glue_providers.dart';
 import '../../../domain/entities/recipe.dart';
+import '../../services/haptics_service.dart';
 
 class CookModePage extends ConsumerStatefulWidget {
   const CookModePage({super.key, required this.recipeId});
@@ -122,7 +123,7 @@ class _CookModePageState extends ConsumerState<CookModePage> {
     }
   }
 
-  void _haptic() => HapticFeedback.mediumImpact();
+  void _haptic() { ref.read(hapticsServiceProvider).mediumImpact(); }
 
   Future<void> _speakCurrent({bool force = false}) async {
     final session = ref.read(cookSessionProvider(widget.recipeId));
@@ -278,7 +279,9 @@ class _CookModePageState extends ConsumerState<CookModePage> {
             final servings = session.servingsOverride == 0 ? recipe.servings : session.servingsOverride;
 
             return SafeArea(
-              child: Column(
+              child: FocusTraversalGroup(
+                policy: OrderedTraversalPolicy(),
+                child: Column(
                 children: [
                   // Yield scaler + ingredients peek
                   Padding(
@@ -410,29 +413,40 @@ class _CookModePageState extends ConsumerState<CookModePage> {
                           },
                         ),
                         const Spacer(),
-                        FilledButton.icon(
-                          onPressed: () {
+                        Semantics(
+                          label: 'Previous step',
+                          hint: 'Go to previous instruction',
+                          button: true,
+                          child: FilledButton.icon(
+                            onPressed: () {
                             _haptic();
                             notifier.prev();
                             _speakCurrent();
                           },
-                          icon: const Icon(Icons.arrow_back),
-                          label: const Text('Back'),
+                            icon: const Icon(Icons.arrow_back),
+                            label: const Text('Back'),
+                          ),
                         ),
                         const SizedBox(width: 12),
-                        FilledButton.icon(
-                          onPressed: () {
+                        Semantics(
+                          label: 'Next step',
+                          hint: 'Go to next instruction',
+                          button: true,
+                          child: FilledButton.icon(
+                            onPressed: () {
                             _haptic();
                             notifier.next(steps.length);
                             _speakCurrent();
                           },
-                          icon: const Icon(Icons.arrow_forward),
-                          label: const Text('Next'),
+                            icon: const Icon(Icons.arrow_forward),
+                            label: const Text('Next'),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ],
+                ),
               ),
             );
           },
